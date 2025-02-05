@@ -1,5 +1,6 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
+import CircularProgress from '@mui/material/CircularProgress';
 import WelcomeDashboard from './welcome';
 import getOrCreateUUID from '../utils/uuid';
 import { Preferences } from '@capacitor/preferences';
@@ -7,6 +8,36 @@ import API_BASE_URL from '@/config/apiConfig';
 
 export default function Welcome() {
   const router = useRouter();
+  const [isLoading, setIsLoading] = useState(true);
+  const [shouldShowWelcome, setShouldShowWelcome] = useState(false);
+
+  const updateActivity = async (deviceId) => {
+    try {
+      console.log('Attempting to update activity for device:', deviceId); // Debug log
+  
+      const response = await fetch(`${API_BASE_URL}/api/devices/update_activity`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ deviceId }),
+      });
+      
+      const responseData = await response.text();
+      console.log('Raw response:', responseData); // Debug log
+      
+      if (!response.ok) {
+        throw new Error(`Failed to update activity: ${responseData}`);
+      }
+      
+      const data = JSON.parse(responseData);
+      console.log('Activity updated successfully:', data);
+      return data;
+    } catch (error) {
+      console.error('Error updating activity:', error);
+      throw error;
+    }
+  };
 
   useEffect(() => {
     const checkUserStatus = async () => {
@@ -14,30 +45,31 @@ export default function Welcome() {
         const { value: userId } = await Preferences.get({ key: 'userId' });
   
         if (userId) {
+          await updateActivity(userId); // Update activity timestamp
           const deviceExists = await checkDeviceExists(userId);
           
-          // Only redirect if device exists
           if (deviceExists) {
             router.push('/dashboard');
-          }
-          // If device doesn't exist, register it but stay on welcome page
-          else {
+          } else {
             await registerDevice(userId);
+            setShouldShowWelcome(true);
           }
         } else {
-          // For new users
           const newUserId = getOrCreateUUID();
           await Preferences.set({
             key: 'userId',
             value: newUserId,
           });
   
-          // Register the device but don't redirect
           await registerDevice(newUserId);
-          // Stay on welcome page for new users
+          await updateActivity(newUserId); // Update activity for new users
+          setShouldShowWelcome(true);
         }
       } catch (error) {
         console.error('Error in checkUserStatus:', error);
+        setShouldShowWelcome(true);
+      } finally {
+        setIsLoading(false);
       }
     };
   
@@ -46,7 +78,7 @@ export default function Welcome() {
 
   const checkDeviceExists = async (deviceId) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/check_device`, {
+      const response = await fetch(`${API_BASE_URL}/api/devices/check_device`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -73,7 +105,7 @@ export default function Welcome() {
 
   const registerDevice = async (deviceId) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/register_device`, {
+      const response = await fetch(`${API_BASE_URL}/api/devices/register_device`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -99,9 +131,18 @@ export default function Welcome() {
     }
   };
 
-  return (
-    <>
-      <WelcomeDashboard />
-    </>
-  );
+  if (isLoading) {
+    return (
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        minHeight: '100vh' 
+      }}>
+        <CircularProgress />
+      </div>
+    );
+  }
+
+  return shouldShowWelcome ? <WelcomeDashboard /> : null;
 }

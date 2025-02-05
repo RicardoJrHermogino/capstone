@@ -1,5 +1,5 @@
 
-const API_BASE_URL = 'http://10.0.0.38:3001';  
+const API_BASE_URL = 'http://10.0.0.38:3000';  
 
 export default API_BASE_URL;
 
