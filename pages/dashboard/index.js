@@ -17,13 +17,13 @@ import { locationCoordinates } from "../../utils/locationCoordinates";
 import toast, { Toaster } from 'react-hot-toast';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
 import CloseIcon from '@mui/icons-material/Close'; 
-import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
+// import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
 
 import { useLocation } from '@/utils/LocationContext'; // Import the custom hook
 import SkeletonLoader from './dashboardcomp/SkeletonLoader';
 import API_BASE_URL from '@/config/apiConfig';
 
-import { initDatabase } from '@/utils/offlineDatabase';
+// import { initDatabase } from '@/utils/offlineDatabase';
 
 
 const Dashboard = () => {
@@ -54,10 +54,10 @@ const Dashboard = () => {
   const [isOnline, setIsOnline] = useState(true);
   const router = useRouter();
 
-  const handleDownloadData = async () => {
-    await initDatabase();
-    alert('Data downloaded for offline use!');
-  };
+  // const handleDownloadData = async () => {
+  //   await initDatabase();
+  //   alert('Data downloaded for offline use!');
+  // };
 
   const apiKey = process.env.NEXT_PUBLIC_WEATHER_API_KEY; 
 
@@ -329,7 +329,7 @@ const Dashboard = () => {
            
           </div>
         </Grid>
-        <Grid item xs={4} sm={6} sx={{ textAlign: 'right' }}>
+        {/* <Grid item xs={4} sm={6} sx={{ textAlign: 'right' }}>
           <IconButton 
             sx={{ border: '1px solid lightgray', borderRadius: '20px', width: '56px', height: '56px', backgroundColor: 'white' }}
             onClick={ handleDownloadData}
@@ -338,7 +338,7 @@ const Dashboard = () => {
               <CloudDownloadIcon sx={{ fontSize: '25px', color: 'black' }} />
             </Badge>
           </IconButton>
-        </Grid>
+        </Grid> */}
 
 
         {/* Button to Open Drawer */}

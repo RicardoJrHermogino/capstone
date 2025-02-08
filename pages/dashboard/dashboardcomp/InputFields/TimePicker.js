@@ -1,4 +1,3 @@
-// TimePicker.js
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Select, MenuItem, Grid, InputLabel, FormControl, OutlinedInput, InputAdornment } from '@mui/material';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
@@ -16,8 +15,7 @@ const CustomTimePicker = ({
   const [availableTimes, setAvailableTimes] = useState([]);
   const [lastAvailableDate, setLastAvailableDate] = useState(null);
 
-
-  
+  // Time intervals for the 24-hour period
   const timeIntervals = useMemo(() => [
     '00:00', '03:00', '06:00', '09:00', 
     '12:00', '15:00', '18:00', '21:00'
@@ -30,7 +28,13 @@ const CustomTimePicker = ({
   useEffect(() => {
     const fetchAvailableTimeIntervals = async () => {
       try {
-        const response = await axios.get(`${API_BASE_URL}/api/getWeatherData`);
+        // API request without credentials
+        const response = await axios.get(`${API_BASE_URL}/api/getWeatherData`, {
+          headers: {
+            // Add any headers needed (like Authorization) if necessary
+          },
+        });
+
         const forecastData = response.data;
 
         const lastDate = forecastData[forecastData.length - 1]?.date;
@@ -49,20 +53,20 @@ const CustomTimePicker = ({
     fetchAvailableTimeIntervals();
   }, []);
 
-// Memoize available time intervals
-const availableTimeIntervals = useMemo(() => {
-  return timeIntervals.map((time) => {
-    const fullTime = dayjs(`${selectedDate} ${time}`, 'YYYY-MM-DD HH:mm');
-    const isPastTime = selectedDate === currentDate && fullTime.isBefore(currentDateTime);
-    const isUnavailableForLastDate =
-      selectedDate === lastAvailableDate && !availableTimes.includes(time);
+  // Memoize available time intervals
+  const availableTimeIntervals = useMemo(() => {
+    return timeIntervals.map((time) => {
+      const fullTime = dayjs(`${selectedDate} ${time}`, 'YYYY-MM-DD HH:mm');
+      const isPastTime = selectedDate === currentDate && fullTime.isBefore(currentDateTime);
+      const isUnavailableForLastDate =
+        selectedDate === lastAvailableDate && !availableTimes.includes(time);
 
-    return {
-      time,
-      isDisabled: isPastTime || isUnavailableForLastDate,
-    };
-  });
-}, [timeIntervals, selectedDate, currentDate, currentDateTime, lastAvailableDate, availableTimes]);
+      return {
+        time,
+        isDisabled: isPastTime || isUnavailableForLastDate,
+      };
+    });
+  }, [timeIntervals, selectedDate, currentDate, currentDateTime, lastAvailableDate, availableTimes]);
 
   // Reset the selected time if it becomes invalid
   useEffect(() => {
@@ -98,7 +102,7 @@ const availableTimeIntervals = useMemo(() => {
           value={selectedTime}
           onChange={handleTimeChange}
           label="Time"
-          input={
+          input={(
             <OutlinedInput
               label="Time"
               startAdornment={
@@ -107,7 +111,7 @@ const availableTimeIntervals = useMemo(() => {
                 </InputAdornment>
               }
             />
-          }
+          )}
           MenuProps={{
             PaperProps: {
               style: {

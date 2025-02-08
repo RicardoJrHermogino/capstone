@@ -78,7 +78,6 @@ const CheckTaskFeasibilityPage = ({ open, handleClose }) => {
         setAvailableForecastTimes(timesForLastDate);
       } catch (error) {
         console.error("Error fetching initial forecast data:", error);
-        showErrorToast("Failed to fetch initial forecast data.");
       }
     };
 
@@ -86,7 +85,6 @@ const CheckTaskFeasibilityPage = ({ open, handleClose }) => {
   }, []); 
 
   const [isOnline, setIsOnline] = useState(navigator.onLine);
-  const [offlineDialogOpen, setOfflineDialogOpen] = useState(!navigator.onLine);
 
   // In the fetchAvailableTimes function, add:
   const getLastAvailableDateTime = (forecastData) => {
@@ -140,43 +138,7 @@ const CheckTaskFeasibilityPage = ({ open, handleClose }) => {
     fetchAvailableTimes();
   }, []);
 
-    // Fetch available tasks
-    useEffect(() => {
-      const fetchAvailableTasks = async () => {
-        try {
-          const response = await fetch(`${API_BASE_URL}/api/coconut_tasks`);
-          if (response.ok) {
-            const data = await response.json();
-            setAvailableTasks(data.coconut_tasks || []);
-          }
-        } catch (error) {
-          console.error('Error fetching tasks:', error);
-        }
-      };
-      fetchAvailableTasks();
-    }, []);
-
-  useEffect(() => {
-    const handleOnline = () => {
-      setIsOnline(true);
-      setOfflineDialogOpen(false);
-      // Attempt to reload tasks when back online
-      fetchTasks();
-    };
-
-    const handleOffline = () => {
-      setIsOnline(false);
-      setOfflineDialogOpen(true);
-    };
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
+  
 
 
 
@@ -184,7 +146,6 @@ const CheckTaskFeasibilityPage = ({ open, handleClose }) => {
    const fetchTasks = async () => {
     if (!navigator.onLine) {
       setLoading(false);
-      setOfflineDialogOpen(true);
       return;
     }
 
@@ -472,48 +433,7 @@ const getTimeOptions = () => {
     }
 };
   
-  const renderOfflineDialog = () => (
-    <Dialog 
-      open={offlineDialogOpen} 
-      onClose={() => setOfflineDialogOpen(false)} 
-      fullWidth 
-      maxWidth="sm"
-    >
-      <DialogTitle>
-        <Box display="flex" alignItems="center" justifyContent="center" flexDirection="column">
-          <SignalWifiOffIcon sx={{ fontSize: 100, color: '#e0e0e0', mb: 2 }} />
-          <Typography variant="h5" align="center">No Internet Connection</Typography>
-        </Box>
-      </DialogTitle>
-      <DialogContent>
-        <Typography variant="body1" align="center" color="textSecondary">
-          Please check your network connection and try again. 
-          Some features may be limited without an internet connection.
-        </Typography>
-      </DialogContent>
-      <DialogActions>
-        <Button 
-          fullWidth 
-          variant="contained" 
-          onClick={() => {
-            if (navigator.onLine) {
-              setOfflineDialogOpen(false);
-              fetchTasks();
-            } else {
-              toast.error("Still offline. Please check your connection.");
-            }
-          }}
-          sx={{
-            borderRadius: '9999px',
-            m: 2,
-            py: 1.5,
-          }}
-        >
-          Retry Connection
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
+ 
   
 
     return (
@@ -687,7 +607,6 @@ const getTimeOptions = () => {
       />
     </DialogContent>
   </Dialog>
-  {renderOfflineDialog()}
   </LocalizationProvider>
   </>
   

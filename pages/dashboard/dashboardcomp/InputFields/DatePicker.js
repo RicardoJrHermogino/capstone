@@ -20,7 +20,13 @@ const DatePicker = ({ selectedDate, setSelectedDate, MenuProps }) => {
   useEffect(() => {
     const fetchAvailableDates = async () => {
       try {
-        const response = await axios.get(`${API_BASE_URL}/api/getWeatherData`);
+        // Make the API request to fetch weather data (without including credentials)
+        const response = await axios.get(`${API_BASE_URL}/api/getWeatherData`, {
+          headers: {
+            // Optionally add any headers here if needed (e.g., Authorization)
+          },
+        });
+
         const forecastData = response.data;
 
         // Extract unique dates from the forecast data and filter out past dates
@@ -28,12 +34,10 @@ const DatePicker = ({ selectedDate, setSelectedDate, MenuProps }) => {
           dayjs(item.date).format('YYYY-MM-DD')
         ))]
         .filter(date => {
-          console.log('Checking date:', date);
-          console.log('Is before today:', dayjs(date).isBefore(dayjs(), 'day'));
-          return !dayjs(date).isBefore(dayjs(), 'day');
+          return !dayjs(date).isBefore(dayjs(), 'day'); // Keep only future or today’s dates
         })
-        .sort();
-        
+        .sort(); // Sort dates in ascending order
+
         console.log('Available dates:', uniqueDates);
 
         setAvailableDates(uniqueDates);
@@ -44,11 +48,13 @@ const DatePicker = ({ selectedDate, setSelectedDate, MenuProps }) => {
         }
       } catch (error) {
         console.error('Error fetching available dates:', error);
+
         // Fallback to next 6 days if API fails
         const fallbackDates = Array.from({ length: 6 }, (_, i) =>
           dayjs().add(i, "day").format("YYYY-MM-DD")
         );
         setAvailableDates(fallbackDates);
+
         if (!selectedDate || !fallbackDates.includes(selectedDate)) {
           setSelectedDate(fallbackDates[0]);
         }
@@ -67,7 +73,7 @@ const DatePicker = ({ selectedDate, setSelectedDate, MenuProps }) => {
           value={selectedDate}
           onChange={(e) => setSelectedDate(e.target.value)}
           label="Date"
-          input={
+          input={(
             <OutlinedInput
               label="Date"
               startAdornment={
@@ -76,7 +82,7 @@ const DatePicker = ({ selectedDate, setSelectedDate, MenuProps }) => {
                 </InputAdornment>
               }
             />
-          }
+          )}
           MenuProps={{
             PaperProps: {
               style: {

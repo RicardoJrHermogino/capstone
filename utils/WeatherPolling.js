@@ -36,7 +36,6 @@ export const PollingProvider = ({ children }) => {
       if (savedFetchData) {
         try {
           const parsedData = JSON.parse(savedFetchData);
-          
           const now = Date.now();
           if (parsedData.firstFetchTime && now - parsedData.firstFetchTime <= 60000) {
             setFetchData(parsedData);
@@ -79,10 +78,10 @@ export const PollingProvider = ({ children }) => {
       fetch(`${API_BASE_URL}/api/fetchWeatherData`, {
         method: 'POST',
         headers: { 
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
         },
-        credentials: 'include', // Include credentials if needed
-        mode: 'cors', // Explicitly set CORS mode
+        credentials: 'omit', // If you don't need credentials, use 'omit'. If needed, use 'include'.
+        mode: 'cors', // Explicitly set CORS mode if necessary
       })
         .then(response => {
           if (!response.ok) {
@@ -93,6 +92,13 @@ export const PollingProvider = ({ children }) => {
         .then(data => {
           console.log('Weather data fetched successfully');
           setIsLoading(false);
+          setFetchData(prevData => {
+            const newData = { count: prevData.count + 1, firstFetchTime: prevData.firstFetchTime };
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('weatherFetchData', JSON.stringify(newData));
+            }
+            return newData;
+          });
         })
         .catch(error => {
           console.error('Error fetching weather data:', error);
@@ -114,19 +120,9 @@ export const PollingProvider = ({ children }) => {
           );
         });
 
-      // Update localStorage with new fetch data
-      const newData = {
-        count: newCount + 1,
-        firstFetchTime: newFirstFetchTime,
-      };
-
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('weatherFetchData', JSON.stringify(newData));
-      }
-
-      return newData;
+      return { count: newCount + 1, firstFetchTime: newFirstFetchTime };
     });
-  }, []); 
+  }, []);
 
   // Set up polling
   useEffect(() => {

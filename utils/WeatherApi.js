@@ -1,23 +1,20 @@
+import axios from 'axios';
+
 class WeatherAPI {
-    constructor(apiKey) {
-      this.apiKey = apiKey;
-    }
-  
-    async fetchWeatherData(lat, lon, location) {
-      console.log(`Fetching 5-day forecast for ${location} at lat: ${lat}, lon: ${lon}`);
-      
-      const forecastResponse = await fetch(
+  constructor(apiKey) {
+    this.apiKey = apiKey;
+  }
+
+  async fetchWeatherData(lat, lon, location) {
+    console.log(`Fetching 5-day forecast for ${location} at lat: ${lat}, lon: ${lon}`);
+    
+    try {
+      const forecastResponse = await axios.get(
         `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${this.apiKey}&units=metric`
       );
   
-      if (!forecastResponse.ok) {
-        throw new Error(`Failed to fetch forecast data for ${location}`);
-      }
-  
-      const data = await forecastResponse.json();
-  
       // Process and structure the forecast data
-      return data.list.map(item => {
+      return forecastResponse.data.list.map(item => {
         const date = new Date(item.dt * 1000);
         return {
           location,
@@ -36,8 +33,10 @@ class WeatherAPI {
           rain_3h: item.rain ? item.rain['3h'] || null : null, 
         };
       });
+    } catch (error) {
+      throw new Error(`Failed to fetch forecast data for ${location}: ${error.message}`);
     }
   }
-  
-  export default WeatherAPI;
-  
+}
+
+export default WeatherAPI;
