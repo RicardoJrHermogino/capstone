@@ -8,7 +8,8 @@ import {
   Chip
 } from '@mui/material';
 import { 
-  WbSunny as SunIcon
+  WbSunny as SunIcon,
+  StarRate as RankIcon
 } from '@mui/icons-material';
 import { WeatherIcon } from './WeatherIcon';
 
@@ -77,9 +78,9 @@ export const IntervalWeatherSummary = ({ interval, onTaskClick }) => {
           No tasks recommended for this time interval.
         </Alert>
       ) : (
-        interval.tasks.map((task, taskIndex) => (
+        interval.tasks.map((task) => (
           <Paper 
-            key={taskIndex} 
+            key={task.task_id} 
             elevation={0} 
             onClick={() => onTaskClick(task)}
             role="button"
@@ -109,12 +110,35 @@ export const IntervalWeatherSummary = ({ interval, onTaskClick }) => {
               }
             }}
           >
-            <Typography 
-              variant="subtitle1" 
-              sx={{ fontWeight: 600, color: 'text.primary' }}
-            >
-              {task.task_name}
-            </Typography>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+              <Typography 
+                variant="subtitle1" 
+                sx={{ fontWeight: 600, color: 'text.primary' }}
+              >
+                {task.task_name}
+              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                <RankIcon 
+                  sx={{ 
+                    color: task.rank === 1 ? 'gold' : 
+                           task.rank === 2 ? 'silver' : 
+                           task.rank === 3 ? '#CD7F32' : 
+                           'rgba(0,0,0,0.3)',
+                    mr: 0.5,
+                    fontSize: 20
+                  }} 
+                />
+                <Typography 
+                  variant="caption" 
+                  sx={{ 
+                    fontWeight: 600, 
+                    color: task.rank <= 3 ? 'primary.main' : 'text.secondary' 
+                  }}
+                >
+                  Top {task.rank}
+                </Typography>
+              </Box>
+            </Box>
             <Typography 
               variant="body2" 
               color="text.secondary"
@@ -128,6 +152,14 @@ export const IntervalWeatherSummary = ({ interval, onTaskClick }) => {
             >
               {task.description}
             </Typography>
+            <Box sx={{ mt: 1, display: 'flex', justifyContent: 'flex-end' }}>
+              <Chip 
+                label={`Match: ${Math.round(task.weatherMatchScore * 100)}%`} 
+                size="small" 
+                color="primary" 
+                variant="outlined"
+              />
+            </Box>
           </Paper>
         ))
       )}

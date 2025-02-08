@@ -135,28 +135,152 @@ const AllRecommendedTasksPage = () => {
       const { main, wind, clouds, weather } = validatedData;
       const weatherConditionCode = weather[0]?.id;
   
-      return tasks.filter(task => {
-        try {
-          const weatherRestrictions = JSON.parse(task.weatherRestrictions || '[]');
-  
-          return (
-            main.temp >= task.requiredTemperature_min &&
-            main.temp <= task.requiredTemperature_max &&
-            main.humidity >= task.idealHumidity_min &&
-            main.humidity <= task.idealHumidity_max &&
-            main.pressure >= task.requiredPressure_min &&
-            main.pressure <= task.requiredPressure_max &&
-            wind.speed <= task.requiredWindSpeed_max &&
-            (wind.gust || 0) <= task.requiredWindGust_max &&
-            clouds.all <= task.requiredCloudCover_max &&
-            (weatherRestrictions.length === 0 ||
-              weatherRestrictions.includes(weatherConditionCode))
-          );
-        } catch (error) {
-          console.error(`Error processing task ${task.task}:`, error);
-          return false;
+      // Function to calculate score for a single weather parameter
+      const calculateParameterScore = (actual, min, max, paramName, weight = 1) => {
+        if (actual < min || actual > max) {
+          console.log(`❌ ${paramName}: Out of range (${actual} not between ${min} and ${max})`);
+          return { score: 0, explanation: `${paramName} is outside acceptable range` };
         }
+        
+        // Calculate score based on how close the actual value is to the ideal range
+        const range = max - min;
+        const idealCenter = (min + max) / 2;
+        const distanceFromCenter = Math.abs(actual - idealCenter);
+        const normalizedScore = 1 - (distanceFromCenter / (range / 2));
+        const score = Math.max(0, Math.min(1, normalizedScore)) * weight;
+        
+        console.log(`✅ ${paramName}: 
+          Actual: ${actual}, 
+          Range: ${min}-${max}, 
+          Score: ${(score * 100).toFixed(2)}%`);
+        
+        return { 
+          score, 
+          explanation: `${paramName} is close to ideal range (${(score * 100).toFixed(2)}% match)` 
+        };
+      };
+  
+      // Rank and score tasks
+      const rankedTasks = tasks
+        .map(task => {
+          try {
+            const weatherRestrictions = JSON.parse(task.weatherRestrictions || '[]');
+  
+            console.log(`\n🔍 Analyzing Task: ${task.task_name}`);
+  
+            // Initial check for hard requirements
+            const passesBasicRequirements = 
+              main.temp >= task.requiredTemperature_min &&
+              main.temp <= task.requiredTemperature_max &&
+              main.humidity >= task.idealHumidity_min &&
+              main.humidity <= task.idealHumidity_max &&
+              main.pressure >= task.requiredPressure_min &&
+              main.pressure <= task.requiredPressure_max &&
+              wind.speed <= task.requiredWindSpeed_max &&
+              (wind.gust || 0) <= task.requiredWindGust_max &&
+              clouds.all <= task.requiredCloudCover_max &&
+              (weatherRestrictions.length === 0 ||
+                weatherRestrictions.includes(weatherConditionCode));
+  
+            if (!passesBasicRequirements) {
+              console.log('❌ Task does not meet basic weather requirements');
+              return null;
+            }
+  
+            // Calculate detailed weather match score
+            const scores = {
+              temperature: calculateParameterScore(
+                main.temp, 
+                task.requiredTemperature_min, 
+                task.requiredTemperature_max, 
+                'Temperature', 
+                2  // Higher weight for temperature
+              ),
+              humidity: calculateParameterScore(
+                main.humidity, 
+                task.idealHumidity_min, 
+                task.idealHumidity_max, 
+                'Humidity'
+              ),
+              pressure: calculateParameterScore(
+                main.pressure, 
+                task.requiredPressure_min, 
+                task.requiredPressure_max, 
+                'Pressure'
+              ),
+              windSpeed: calculateParameterScore(
+                wind.speed, 
+                0, 
+                task.requiredWindSpeed_max, 
+                'Wind Speed'
+              ),
+              windGust: calculateParameterScore(
+                wind.gust || 0, 
+                0, 
+                task.requiredWindGust_max, 
+                'Wind Gust'
+              ),
+              cloudCover: calculateParameterScore(
+                clouds.all, 
+                0, 
+                task.requiredCloudCover_max, 
+                'Cloud Cover'
+              ),
+              weatherCondition: (() => {
+                if (weatherRestrictions.length === 0) {
+                  console.log('✅ No specific weather condition restrictions');
+                  return { score: 1, explanation: 'No weather condition restrictions' };
+                }
+                
+                const isMatchingCondition = weatherRestrictions.includes(weatherConditionCode);
+                console.log(`${isMatchingCondition ? '✅' : '❌'} Weather Condition: 
+                  Current: ${weatherConditionCode}, 
+                  Allowed: ${weatherRestrictions.join(', ')}`);
+                
+                return {
+                  score: isMatchingCondition ? 1 : 0,
+                  explanation: isMatchingCondition 
+                    ? 'Matches required weather condition' 
+                    : 'Does not match required weather condition'
+                };
+              })()
+            };
+  
+            // Calculate overall weather match score
+            const scoreValues = Object.values(scores).map(s => s.score);
+            const overallScore = scoreValues.reduce((a, b) => a + b, 0) / scoreValues.length;
+  
+            console.log(`\n📊 Overall Weather Match Score for ${task.task_name}: 
+              ${(overallScore * 100).toFixed(2)}%`);
+            
+            console.log('Detailed Score Breakdown:');
+            Object.entries(scores).forEach(([key, value]) => {
+              console.log(`- ${key}: ${(value.score * 100).toFixed(2)}% (${value.explanation})`);
+            });
+  
+            return {
+              ...task,
+              weatherMatchScore: overallScore,
+              scoreDetails: scores
+            };
+          } catch (error) {
+            console.error(`Error processing task ${task.task_name}:`, error);
+            return null;
+          }
+        })
+        .filter(Boolean)  // Remove null entries
+        .sort((a, b) => b.weatherMatchScore - a.weatherMatchScore)  // Sort by descending score
+        .map((task, index) => ({
+          ...task,
+          rank: index + 1  // Add ranking
+        }));
+  
+      console.log('\n🏆 Final Task Ranking:');
+      rankedTasks.forEach(task => {
+        console.log(`${task.rank}. ${task.task_name} - ${(task.weatherMatchScore * 100).toFixed(2)}% match`);
       });
+  
+      return rankedTasks;
     } catch (error) {
       console.error('Error in getRecommendedTasks:', error);
       return [];

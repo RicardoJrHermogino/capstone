@@ -17,9 +17,13 @@ import { locationCoordinates } from "../../utils/locationCoordinates";
 import toast, { Toaster } from 'react-hot-toast';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
 import CloseIcon from '@mui/icons-material/Close'; 
+import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
+
 import { useLocation } from '@/utils/LocationContext'; // Import the custom hook
 import SkeletonLoader from './dashboardcomp/SkeletonLoader';
 import API_BASE_URL from '@/config/apiConfig';
+
+import { initDatabase } from '@/utils/offlineDatabase';
 
 
 const Dashboard = () => {
@@ -49,6 +53,11 @@ const Dashboard = () => {
   const TOAST_COOLDOWN = 5000; // 2 seconds cooldown between toasts
   const [isOnline, setIsOnline] = useState(true);
   const router = useRouter();
+
+  const handleDownloadData = async () => {
+    await initDatabase();
+    alert('Data downloaded for offline use!');
+  };
 
   const apiKey = process.env.NEXT_PUBLIC_WEATHER_API_KEY; 
 
@@ -85,34 +94,7 @@ const Dashboard = () => {
   }, [lastToastTime]); // Add lastToastTime as dependency
 
 
-  // Update the useEffect with network status checking
-  useEffect(() => {
-    const checkOnlineStatus = () => {
-      setIsOnline(navigator.onLine);
-      if (!navigator.onLine) {
-        router.push('/offline');
-      }
-    };
 
-    const handleOnline = () => {
-      setIsOnline(true);
-    };
-
-    const handleOffline = () => {
-      setIsOnline(false);
-      router.push('/offline');
-    };
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    checkOnlineStatus();
-
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, [router, showErrorToast]); // Include both router and showErrorToast
 
 
   // Fetch current weather data based on the user's location
@@ -344,7 +326,18 @@ const Dashboard = () => {
               width={55} height={55}
             />
             <Typography variant="body1"><strong>TaskWeatherSync</strong></Typography>
+           
           </div>
+        </Grid>
+        <Grid item xs={4} sm={6} sx={{ textAlign: 'right' }}>
+          <IconButton 
+            sx={{ border: '1px solid lightgray', borderRadius: '20px', width: '56px', height: '56px', backgroundColor: 'white' }}
+            onClick={ handleDownloadData}
+          >
+            <Badge badgeContent={0} color="error">
+              <CloudDownloadIcon sx={{ fontSize: '25px', color: 'black' }} />
+            </Badge>
+          </IconButton>
         </Grid>
 
 

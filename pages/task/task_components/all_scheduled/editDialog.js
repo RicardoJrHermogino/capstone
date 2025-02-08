@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Dialog, DialogTitle, DialogContent, 
   DialogActions, Button, Grid, 
@@ -6,9 +6,15 @@ import {
   MenuItem, Box, IconButton, TextField, 
   Autocomplete 
 } from '@mui/material';
+import axios from 'axios';
 import CloseIcon from '@mui/icons-material/Close';
 import dayjs from 'dayjs';
 import { locationCoordinates } from '@/utils/locationCoordinates';
+import { LocalizationProvider } from '@mui/x-date-pickers';
+import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
+import TimeSelector from './TimeSelector';
+import DateSelector from './DateSelector';
+import API_BASE_URL from '@/config/apiConfig';
 
 const EditTaskDialog = ({ 
   open, 
@@ -18,17 +24,38 @@ const EditTaskDialog = ({
   onUpdate, 
   availableTasks 
 }) => {
-  const createTimeIntervals = () => {
-    const timeIntervals = ['Now', '03:00', '06:00', '09:00', '12:00', '15:00', '18:00'];
-    return timeIntervals.map((time) => {
-      const fullTime = time === 'Now' ? dayjs() : dayjs(`2024-01-01 ${time}`);
-      return (
-        <MenuItem key={time} value={time}>
-          {time === 'Now' ? 'Now' : fullTime.format('hh:mm A')}
-        </MenuItem>
-      );
-    });
-  };
+  const [selectedDate, setSelectedDate] = useState(task?.date || null);
+  const [selectedTime, setSelectedTime] = useState(task?.time || null);  
+  const [availableForecastTimes, setAvailableForecastTimes] = useState([]);
+  const [hasInteractedWithTime, setHasInteractedWithTime] = useState(false);   
+
+  useEffect(() => {
+    if (task) {
+      setSelectedDate(task.date || null);
+      setSelectedTime(task.time || null);
+    }
+  }, [task]);
+
+  useEffect(() => {
+    const fetchInitialForecastData = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/api/getWeatherData`);
+        const forecastData = response.data;
+
+        const lastDate = forecastData[forecastData.length - 1]?.date;
+        const timesForLastDate = forecastData
+          .filter((item) => item.date === lastDate)
+          .map((item) => dayjs(item.time, 'HH:mm:ss').format('HH:00'));
+
+        setAvailableForecastTimes(timesForLastDate);
+      } catch (error) {
+        console.error("Error fetching initial forecast data:", error);
+        showErrorToast("Failed to fetch initial forecast data.");
+      }
+    };
+
+    fetchInitialForecastData();
+  }, []); 
 
   const dateOptions = Array.from({ length: 6 }, (_, index) => {
     const date = dayjs().add(index, 'day');
@@ -43,179 +70,169 @@ const EditTaskDialog = ({
   });
 
   return (
-    <Dialog 
-      open={open} 
-      onClose={onClose} 
-      fullWidth 
-      maxWidth="md"
-      sx={{
-        '& .MuiBackdrop-root': {
-          backgroundColor: 'rgba(255, 255, 255, 0.3)',
-          backdropFilter: 'blur(5px)',
-        },
-        '& .MuiDialog-paper': {
-          padding: '4px',
-          p: '10px',
-          height: '80%',
-          maxHeight: 'none',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'space-between',
-          borderRadius: '30px',
-          boxShadow: '0px 4px 20px rgba(0, 0, 0, 0.15)',
-        },
-      }}
-    >
-      <DialogTitle sx={{ 
-        pb: 3,
-        fontSize: '24px',
-        fontWeight: 'bold',
-        borderBottom: '1px solid rgba(0, 0, 0, 0.12)',
-        color: '#333',
-        mb: '20px',
-      }}>
-        Edit Task
-        <IconButton 
-          onClick={onClose} 
-          sx={{
-            position: 'absolute',
-            top: '20px',
-            right: '20px',
-            cursor: 'pointer',
-          }}
-        >
-          <CloseIcon />
-        </IconButton>
-      </DialogTitle>
-
-      <DialogContent
+    <LocalizationProvider dateAdapter={AdapterDayjs}>
+      <Dialog 
+        open={open} 
+        onClose={onClose} 
+        fullWidth 
+        maxWidth="md"
         sx={{
-          display: 'flex',
-          flexDirection: 'column',
-          p: 3,
-          flex: 1,
-          overflow: 'auto',
-        }}
-      >
-        <Box 
-          component="form" 
-          sx={{ 
-            width: '100%',
+          '& .MuiBackdrop-root': {
+            backgroundColor: 'rgba(255, 255, 255, 0.3)',
+            backdropFilter: 'blur(5px)',
+          },
+          '& .MuiDialog-paper': {
+            padding: '4px',
+            p: '10px',
+            height: '80%',
+            maxHeight: 'none',
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'space-between',
-            height: '100%',
+            borderRadius: '30px',
+            boxShadow: '0px 4px 20px rgba(0, 0, 0, 0.15)',
+          },
+        }}
+      >
+        <DialogTitle sx={{ 
+          pb: 3,
+          fontSize: '24px',
+          fontWeight: 'bold',
+          borderBottom: '1px solid rgba(0, 0, 0, 0.12)',
+          color: '#333',
+          mb: '20px',
+        }}>
+          Edit Task
+          <IconButton 
+            onClick={onClose} 
+            sx={{
+              position: 'absolute',
+              top: '20px',
+              right: '20px',
+              cursor: 'pointer',
+            }}
+          >
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+
+        <DialogContent
+          sx={{
+            display: 'flex',
+            flexDirection: 'column',
+            p: 3,
+            flex: 1,
+            overflow: 'auto',
           }}
         >
-          <Grid container spacing={4}>
-            <Grid item xs={12}>
-              <FormControl fullWidth>
-                <Autocomplete
-                  options={availableTasks.map((t) => t.task_name)}
-                  renderInput={(params) => 
-                    <TextField {...params} label="Select Task" size="medium" />
-                  }
-                  value={task?.task_name || ''}
-                  onChange={(_, newValue) => setTask({ ...task, task_name: newValue })}
-                />
-              </FormControl>
-            </Grid>
-
-            <Grid item xs={12}>
-              <FormControl fullWidth>
-                <InputLabel>Select Date</InputLabel>
-                <Select
-                  value={task?.date || ''}
-                  label="Date"
-                  onChange={(e) => setTask({ ...task, date: e.target.value })}
-                  size="medium"
-                >
-                  {dateOptions}
-                </Select>
-              </FormControl>
-            </Grid>
-
-            <Grid item xs={12}>
-              <FormControl fullWidth>
-                <InputLabel>Select Time</InputLabel>
-                <Select
-                  value={task?.time || ''}
-                  label="Time"
-                  onChange={(e) => setTask({ ...task, time: e.target.value })}
-                  size="medium"
-                >
-                  {createTimeIntervals()}
-                </Select>
-              </FormControl>
-            </Grid>
-
-            <Grid item xs={12}>
-              <FormControl fullWidth>
-                <Autocomplete
-                  options={Object.keys(locationCoordinates)}
-                  renderInput={(params) => 
-                    <TextField {...params} label="Select Location" size="medium" />
-                  }
-                  value={task?.location || ''}
-                  onChange={(_, newValue) => {
-                    if (newValue) {
-                      setTask({
-                        ...task,
-                        location: newValue,
-                        lat: locationCoordinates[newValue].lat,
-                        lon: locationCoordinates[newValue].lon
-                      });
-                    } else {
-                      setTask({ ...task, location: '', lat: null, lon: null });
+          <Box 
+            component="form" 
+            sx={{ 
+              width: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              height: '100%',
+            }}
+          >
+            <Grid container spacing={4}>
+              <Grid item xs={12}>
+                <FormControl fullWidth>
+                  <Autocomplete
+                    options={availableTasks.map((t) => t.task_name)}
+                    renderInput={(params) => 
+                      <TextField {...params} label="Select Task" size="medium" />
                     }
-                  }}
-                />
-              </FormControl>
-            </Grid>
-          </Grid>
-        </Box>
-      </DialogContent>
+                    value={task?.task_name || ''}
+                    onChange={(_, newValue) => setTask({ ...task, task_name: newValue })}
+                  />
+                </FormControl>
+              </Grid>
 
-      <DialogActions>
-        <Box sx={{ width: '100%', px: 3, pb: 3 }}>
-          <Button
-            fullWidth
-            variant="contained"
-            onClick={onUpdate}
-            sx={{
-              backgroundColor: '#48ccb4',
-              color: 'white',
-              borderRadius: '9999px',
-              py: 1.9,
-              mb: 1,
-              textTransform: 'none',
-              fontSize: '15px',
-            }}
-          >
-            Edit
-          </Button>
-          <Button
-            fullWidth
-            variant="contained"
-            onClick={onClose}
-            sx={{
-              bgcolor: 'rgb(243, 244, 246)',
-              color: 'black',
-              borderRadius: '9999px',
-              py: 1.9,
-              textTransform: 'none',
-              fontSize: '15px',
-              '&:hover': {
-                bgcolor: 'rgb(229, 231, 235)',
-              },
-              boxShadow: 'none',
-            }}
-          >
-            Cancel
-          </Button>
-        </Box>
-      </DialogActions>
-    </Dialog>
+              <Grid item xs={12} sm={6}>
+                <DateSelector 
+                  selectedDate={selectedDate} 
+                  setSelectedDate={setSelectedDate} 
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TimeSelector
+                  selectedTime={selectedTime}
+                  setSelectedTime={setSelectedTime}
+                  selectedDate={selectedDate}
+                  availableTimes={availableForecastTimes}
+                  setHasInteractedWithTime={setHasInteractedWithTime}
+                />
+              </Grid>
+
+              <Grid item xs={12}>
+                <FormControl fullWidth>
+                  <Autocomplete
+                    options={Object.keys(locationCoordinates)}
+                    renderInput={(params) => 
+                      <TextField {...params} label="Select Location" size="medium" />
+                    }
+                    value={task?.location || ''}
+                    onChange={(_, newValue) => {
+                      if (newValue) {
+                        setTask({
+                          ...task,
+                          location: newValue,
+                          lat: locationCoordinates[newValue].lat,
+                          lon: locationCoordinates[newValue].lon
+                        });
+                      } else {
+                        setTask({ ...task, location: '', lat: null, lon: null });
+                      }
+                    }}
+                  />
+                </FormControl>
+              </Grid>
+            </Grid>
+          </Box>
+        </DialogContent>
+
+        <DialogActions>
+          <Box sx={{ width: '100%', px: 3, pb: 3 }}>
+            <Button
+              fullWidth
+              variant="contained"
+              onClick={onUpdate}
+              sx={{
+                backgroundColor: '#48ccb4',
+                color: 'white',
+                borderRadius: '9999px',
+                py: 1.9,
+                mb: 1,
+                textTransform: 'none',
+                fontSize: '15px',
+              }}
+            >
+              Edit
+            </Button>
+            <Button
+              fullWidth
+              variant="contained"
+              onClick={onClose}
+              sx={{
+                bgcolor: 'rgb(243, 244, 246)',
+                color: 'black',
+                borderRadius: '9999px',
+                py: 1.9,
+                textTransform: 'none',
+                fontSize: '15px',
+                '&:hover': {
+                  bgcolor: 'rgb(229, 231, 235)',
+                },
+                boxShadow: 'none',
+              }}
+            >
+              Cancel
+            </Button>
+          </Box>
+        </DialogActions>
+      </Dialog>
+    </LocalizationProvider>
   );
 };
 

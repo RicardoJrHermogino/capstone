@@ -21,12 +21,16 @@ import {
   Stack
 } from '@mui/material';
 import dayjs from 'dayjs';
+import { LocalizationProvider } from '@mui/x-date-pickers';
+import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import { locationCoordinates } from '@/utils/locationCoordinates';
 import axios from 'axios';
 import { toast } from 'react-hot-toast';
 import { Preferences } from '@capacitor/preferences';
 import TaskFeasibilityResultDialog from './TaskFeasibilityResultDialog'
 import API_BASE_URL from '@/config/apiConfig';
+import DateSelector from './DateSelector';
+import TimeSelector from './TimeSelector';
 
 // Custom Paper component for dropdown
 const CustomPaper = (props) => (
@@ -38,10 +42,11 @@ const apiKey = process.env.NEXT_PUBLIC_WEATHER_API_KEY;
 
 const CheckTaskFeasibilityPage = ({ open, handleClose }) => {
   const [tasks, setTasks] = useState([]);
+  const [availableTasks, setAvailableTasks] = useState([]);
   const [selectedTask, setSelectedTask] = useState('');
   const [selectedLocation, setSelectedLocation] = useState('');
-  const [selectedDate, setSelectedDate] = useState(dayjs().format('YYYY-MM-DD'));
-  const [selectedTime, setSelectedTime] = useState('');
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [selectedTime, setSelectedTime] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [resultMessage, setResultMessage] = useState('');
@@ -50,10 +55,35 @@ const CheckTaskFeasibilityPage = ({ open, handleClose }) => {
   const [lastForecastDate, setLastForecastDate] = useState(null);
   const [availableTimes, setAvailableTimes] = useState([]);
   const [lastForecastDateTime, setLastForecastDateTime] = useState(null);
+  const [availableForecastTimes, setAvailableForecastTimes] = useState([]);
+  const [hasInteractedWithTime, setHasInteractedWithTime] = useState(false);
+  
   const [feasibilityResult, setFeasibilityResult] = useState({
     isFeasible: false,
     message: ''
   });
+
+  useEffect(() => {
+    // Fetch forecast data and extract available times for the last date
+    const fetchInitialForecastData = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/api/getWeatherData`);
+        const forecastData = response.data;
+
+        const lastDate = forecastData[forecastData.length - 1]?.date;
+        const timesForLastDate = forecastData
+          .filter((item) => item.date === lastDate)
+          .map((item) => dayjs(item.time, 'HH:mm:ss').format('HH:00'));
+
+        setAvailableForecastTimes(timesForLastDate);
+      } catch (error) {
+        console.error("Error fetching initial forecast data:", error);
+        showErrorToast("Failed to fetch initial forecast data.");
+      }
+    };
+
+    fetchInitialForecastData();
+  }, []); 
 
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [offlineDialogOpen, setOfflineDialogOpen] = useState(!navigator.onLine);
@@ -109,6 +139,22 @@ const CheckTaskFeasibilityPage = ({ open, handleClose }) => {
   useEffect(() => {
     fetchAvailableTimes();
   }, []);
+
+    // Fetch available tasks
+    useEffect(() => {
+      const fetchAvailableTasks = async () => {
+        try {
+          const response = await fetch(`${API_BASE_URL}/api/coconut_tasks`);
+          if (response.ok) {
+            const data = await response.json();
+            setAvailableTasks(data.coconut_tasks || []);
+          }
+        } catch (error) {
+          console.error('Error fetching tasks:', error);
+        }
+      };
+      fetchAvailableTasks();
+    }, []);
 
   useEffect(() => {
     const handleOnline = () => {
@@ -472,6 +518,7 @@ const getTimeOptions = () => {
 
     return (
       <>
+      <LocalizationProvider dateAdapter={AdapterDayjs}>
       <Dialog 
         open={open && isOnline} 
         onClose={handleClose} 
@@ -567,47 +614,20 @@ const getTimeOptions = () => {
             </FormControl>
           </Grid>
 
-            {/* Separate Date and Time into their own rows */}
-            <Grid item xs={12}>
-              <FormControl fullWidth>
-                <InputLabel>Select Date</InputLabel>
-                <Select
-                  value={selectedDate}
-                  label="Date"
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  size="medium"
-                >
-                  {Array.from({ length: 6 }, (_, index) => {
-                    const date = dayjs().add(index, 'day');
-                    const isAfterLastForecast = date.isAfter(dayjs(lastForecastDateTime));
-                    if (isAfterLastForecast) return null;
-                    
-                    return (
-                      <MenuItem 
-                        key={date.format('YYYY-MM-DD')} 
-                        value={date.format('YYYY-MM-DD')}
-                      >
-                        {date.format('dddd, MMMM D, YYYY')}
-                      </MenuItem>
-                    );
-                  }).filter(Boolean)}
-                </Select>
-              </FormControl>
+          <Grid item xs={12} sm={6}>
+            <DateSelector 
+              selectedDate={selectedDate} 
+              setSelectedDate={setSelectedDate} 
+            />
           </Grid>
-
-            {/* Update the time options generation */}
-            <Grid item xs={12}>
-            <FormControl fullWidth>
-              <InputLabel>Select Time</InputLabel>
-              <Select
-                value={selectedTime}
-                label="Time"
-                onChange={(e) => setSelectedTime(e.target.value)}
-                size="medium"
-              >
-                {getTimeOptions()}
-              </Select>
-            </FormControl>
+          <Grid item xs={12} sm={6}>
+          <TimeSelector
+            selectedTime={selectedTime}
+            setSelectedTime={setSelectedTime}
+            selectedDate={selectedDate}
+            availableTimes={availableForecastTimes}
+            setHasInteractedWithTime={setHasInteractedWithTime} // Pass the function here
+          />
           </Grid>
           </Grid>
 
@@ -668,6 +688,7 @@ const getTimeOptions = () => {
     </DialogContent>
   </Dialog>
   {renderOfflineDialog()}
+  </LocalizationProvider>
   </>
   
 

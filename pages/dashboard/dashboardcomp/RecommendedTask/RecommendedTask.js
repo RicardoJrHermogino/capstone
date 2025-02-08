@@ -6,6 +6,106 @@ import TaskDetailsDialog from './TaskDetailsDialog'; // Using the separate dialo
 import dayjs from 'dayjs';
 import API_BASE_URL from '@/config/apiConfig';
 
+
+// New function to rank tasks similar to AllRecommendedTasksPage
+const getRecommendedTasks = (weatherData, tasks) => {
+  try {
+    const { main, wind, clouds, weather } = weatherData;
+    const weatherConditionCode = weather[0]?.id;
+
+    const calculateParameterScore = (actual, min, max, paramName, weight = 1) => {
+      if (actual < min || actual > max) return { score: 0, explanation: `${paramName} out of range` };
+      
+      const range = max - min;
+      const idealCenter = (min + max) / 2;
+      const distanceFromCenter = Math.abs(actual - idealCenter);
+      const normalizedScore = 1 - (distanceFromCenter / (range / 2));
+      const score = Math.max(0, Math.min(1, normalizedScore)) * weight;
+      
+      return { 
+        score, 
+        explanation: `${paramName} near ideal range (${(score * 100).toFixed(2)}% match)` 
+      };
+    };
+
+    const rankedTasks = tasks
+      .map(task => {
+        const weatherRestrictions = JSON.parse(task.weatherRestrictions || '[]');
+
+        const passesBasicRequirements = 
+          main.temp >= task.requiredTemperature_min &&
+          main.temp <= task.requiredTemperature_max &&
+          main.humidity >= task.idealHumidity_min &&
+          main.humidity <= task.idealHumidity_max &&
+          main.pressure >= task.requiredPressure_min &&
+          main.pressure <= task.requiredPressure_max &&
+          wind.speed <= task.requiredWindSpeed_max &&
+          (wind.gust || 0) <= task.requiredWindGust_max &&
+          clouds.all <= task.requiredCloudCover_max &&
+          (weatherRestrictions.length === 0 ||
+            weatherRestrictions.includes(weatherConditionCode));
+
+        if (!passesBasicRequirements) return null;
+
+        const scores = {
+          temperature: calculateParameterScore(
+            main.temp, 
+            task.requiredTemperature_min, 
+            task.requiredTemperature_max, 
+            'Temperature', 
+            2
+          ),
+          humidity: calculateParameterScore(
+            main.humidity, 
+            task.idealHumidity_min, 
+            task.idealHumidity_max, 
+            'Humidity'
+          ),
+          pressure: calculateParameterScore(
+            main.pressure, 
+            task.requiredPressure_min, 
+            task.requiredPressure_max, 
+            'Pressure'
+          ),
+          windSpeed: calculateParameterScore(
+            wind.speed, 
+            0, 
+            task.requiredWindSpeed_max, 
+            'Wind Speed'
+          ),
+          weatherCondition: {
+            score: weatherRestrictions.length === 0 || 
+                   weatherRestrictions.includes(weatherConditionCode) ? 1 : 0,
+            explanation: weatherRestrictions.length === 0 || 
+                         weatherRestrictions.includes(weatherConditionCode) 
+                         ? 'Matches weather condition' 
+                         : 'Does not match weather condition'
+          }
+        };
+
+        const scoreValues = Object.values(scores).map(s => s.score);
+        const overallScore = scoreValues.reduce((a, b) => a + b, 0) / scoreValues.length;
+
+        return {
+          ...task,
+          weatherMatchScore: overallScore,
+          scoreDetails: scores
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.weatherMatchScore - a.weatherMatchScore)
+      .map((task, index) => ({
+        ...task,
+        rank: index + 1
+      }));
+
+    return rankedTasks;
+  } catch (error) {
+    console.error('Error in getRecommendedTasks:', error);
+    return [];
+  }
+};
+
 // Function to extract weather data
 const extractWeatherData = (data) => {
   if (!data) return null;
@@ -170,10 +270,26 @@ const RecommendedTask = ({ weatherData, currentWeatherData, useCurrentWeather, l
     return extractWeatherData(effectiveWeatherData);
   }, [useCurrentWeather, currentWeatherData, weatherData]);
 
+  // Update the existing useEffect for processing weather data
   useEffect(() => {
     if (isTimeRestricted(selectedTime) || !processedWeather || !tasksData.length) return;
 
-    const matchingTasks = tasksData.filter((task) => evaluateTask(task, processedWeather));
+    const matchingTasks = getRecommendedTasks(
+      {
+        main: { 
+          temp: processedWeather.temp, 
+          humidity: processedWeather.humidity, 
+          pressure: processedWeather.pressure 
+        },
+        wind: { 
+          speed: processedWeather.windSpeed, 
+          gust: processedWeather.windGust 
+        },
+        clouds: { all: processedWeather.clouds },
+        weather: [{ id: processedWeather.weatherId }]
+      }, 
+      tasksData
+    );
     
     setRecommendedTasks(matchingTasks);
     memoizedSaveRecommendedTasks(matchingTasks);
@@ -302,6 +418,7 @@ const RecommendedTask = ({ weatherData, currentWeatherData, useCurrentWeather, l
                   borderRadius: 7,
                   height: '100px',
                   display: 'flex',
+                  flexDirection: 'column',
                   alignItems: 'center',
                   justifyContent: 'center',
                   backgroundColor: colors[index % colors.length],
@@ -310,7 +427,32 @@ const RecommendedTask = ({ weatherData, currentWeatherData, useCurrentWeather, l
                 }}
                 onClick={() => handleTaskClick(task)}
               >
-                <Typography variant="body1">{task.task_name || task.task}</Typography>
+                <Typography variant="body1" sx={{ textAlign: 'center' }}>
+                  {task.task_name || task.task}
+                </Typography>
+                <Typography 
+                  variant="caption" 
+                  sx={{ 
+                    top: 8, 
+                    right: 8, 
+                    color: task.rank === 1 ? 'gold' : 
+                           task.rank === 2 ? 'silver' : 
+                           task.rank === 3 ? '#CD7F32' : 'text.secondary',
+                    fontWeight: 'bold'
+                  }}
+                >
+                  #{task.rank}
+                </Typography>
+                <Typography 
+                  variant="caption" 
+                  sx={{ 
+                    bottom: 8, 
+                    right: 8, 
+                    color: 'rgba(0,0,0,0.6)' 
+                  }}
+                >
+                  {Math.round(task.weatherMatchScore * 100)}% Match
+                </Typography>
               </Paper>
             </Grid>
           ))
@@ -364,6 +506,3 @@ const RecommendedTask = ({ weatherData, currentWeatherData, useCurrentWeather, l
 };
 
 export default RecommendedTask;
-
-
-

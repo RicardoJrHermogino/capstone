@@ -19,6 +19,8 @@ import { locationCoordinates } from '@/utils/locationCoordinates';
 import API_BASE_URL from '@/config/apiConfig';
 import DateSelector from './DateSelector';
 import TimeSelector from './TimeSelector';
+import { toast } from 'react-hot-toast';
+
 
 
 
@@ -36,6 +38,63 @@ const AddScheduledTask = () => {
   const router = useRouter();
 
 
+// Handle device registration and activity update
+const handleDeviceRegistration = async (deviceId) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/devices/update_activity`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ deviceId }),
+    });
+
+    const data = await response.json();
+    
+    if (response.ok) {
+      console.log('Device activity updated:', data);
+      // If this is a new device, show a welcome message
+      if (data.isNewDevice) {
+        toast.success('Welcome to the application!');
+      }
+    } else {
+      throw new Error(data.error || 'Failed to update device activity');
+    }
+  } catch (error) {
+    console.error('Error handling device registration:', error);
+    toast.error('Error connecting to the service');
+  }
+};
+// Fetch userId and handle device registration
+useEffect(() => {
+  const initializeUser = async () => {
+    try {
+      // Get existing userId
+      const { value: id } = await Preferences.get({ key: 'userId' });
+      
+      if (id) {
+        setUserId(id);
+        // Handle device registration/activity update
+        await handleDeviceRegistration(id);
+      } else {
+        // If no userId exists, create one
+        const newId = crypto.randomUUID();
+        await Preferences.set({
+          key: 'userId',
+          value: newId,
+        });
+        setUserId(newId);
+        // Register the new device
+        await handleDeviceRegistration(newId);
+      }
+    } catch (error) {
+      console.error('Error initializing user:', error);
+      toast.error('Error initializing application');
+    }
+  };
+
+  initializeUser();
+}, []);
 
 
 
@@ -119,7 +178,7 @@ const AddScheduledTask = () => {
       alert("Please complete all inputs");
       return;
     }
-
+  
     try {
       const response = await fetch(`${API_BASE_URL}/api/createScheduleTask`, {
         method: 'POST',
@@ -134,17 +193,21 @@ const AddScheduledTask = () => {
           location,
         }),
       });
-
+  
+      const data = await response.json();
+  
       if (response.ok) {
-        alert('Task scheduled successfully!');
+        toast.success('Task scheduled successfully!');
         resetForm();
         router.push('/task');
+      } else if (response.status === 409) {
+        toast.error('This task already exists for the selected date, time, and location');
       } else {
-        alert('Failed to schedule task');
+        toast.error(data.message || 'Failed to schedule task');
       }
     } catch (error) {
       console.error('Failed to create task:', error);
-      alert('Error scheduling task');
+      toast.error('Error scheduling task');
     }
   };
 
