@@ -17,13 +17,14 @@ import { locationCoordinates } from "../../utils/locationCoordinates";
 import toast, { Toaster } from 'react-hot-toast';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
 import CloseIcon from '@mui/icons-material/Close'; 
-// import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
+import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
 
 import { useLocation } from '@/utils/LocationContext'; // Import the custom hook
 import SkeletonLoader from './dashboardcomp/SkeletonLoader';
 import API_BASE_URL from '@/config/apiConfig';
 
-// import { initDatabase } from '@/utils/offlineDatabase';
+import { initDatabase } from '@/utils/offlineDatabase';
+import { Preferences } from '@capacitor/preferences'; // Add this import
 
 
 const Dashboard = () => {
@@ -54,10 +55,77 @@ const Dashboard = () => {
   const [isOnline, setIsOnline] = useState(true);
   const router = useRouter();
 
-  // const handleDownloadData = async () => {
-  //   await initDatabase();
-  //   alert('Data downloaded for offline use!');
-  // };
+  useEffect(() => {
+    const handleOnlineStatus = () => {
+      setIsOnline(navigator.onLine);
+    };
+  
+    // Check initial status on load
+    handleOnlineStatus();
+  
+    // Listen to online/offline events
+    window.addEventListener('online', handleOnlineStatus);
+    window.addEventListener('offline', handleOnlineStatus);
+  
+    return () => {
+      window.removeEventListener('online', handleOnlineStatus);
+      window.removeEventListener('offline', handleOnlineStatus);
+    };
+  }, []);
+
+  const handleDownloadData = async () => {
+    try {
+      // Add a new state for download loading
+      setLoading(true);
+      console.log('Starting download process');
+      const db = await initDatabase();
+      
+      if (db) {
+        console.log('Database initialized successfully');
+        await Preferences.set({
+          key: 'offlineDataDownloaded',
+          value: 'true'
+        });
+        
+        toast.success('Data downloaded for offline use!', {
+          duration: 4000,
+          style: {
+            borderRadius: "30px",
+            fontSize: "16px",
+            boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+          },
+        });
+      } else {
+        console.error('Database initialization returned null');
+        toast.error('Failed to initialize database', {
+          duration: 4000,
+          style: {
+            borderRadius: "30px",
+            fontSize: "16px",
+            boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+          },
+        });
+      }
+    } catch (error) {
+      console.error('Full download error:', error);
+      console.error('Error name:', error.name);
+      console.error('Error message:', error.message);
+      console.error('Error stack:', error.stack);
+      
+      toast.error(`Error downloading data: ${error.message}`, {
+        duration: 4000,
+        style: {
+          borderRadius: "30px",
+          fontSize: "16px",
+          boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+        },
+      });
+    } finally {
+      // Ensure loading is set to false regardless of success or failure
+      setLoading(false);
+    }
+  };
+
 
   const apiKey = process.env.NEXT_PUBLIC_WEATHER_API_KEY; 
 
@@ -99,10 +167,10 @@ const Dashboard = () => {
 
   // Fetch current weather data based on the user's location
   const fetchCurrentWeatherData = async (lat, lon) => {
-    if (!navigator.onLine) {
-      router.push('/offline');
-      return;
-    }
+    // if (!navigator.onLine) {
+    //   router.push('/offline');
+    //   return;
+    // }
     setLoading(true);
     setIsCurrentWeather(true); // Set to current weather
     setSelectedTime(dayjs().format('HH:mm')); // Add current time when fetching current weather
@@ -120,7 +188,7 @@ const Dashboard = () => {
     } catch (error) {
       // Check if the error is due to network issues
       if (!navigator.onLine || error.message.includes('Network Error')) {
-        router.push('/offline');
+        // router.push('/offline');
       } else {
         showErrorToast("Failed to fetch current weather data.");
       }
@@ -131,10 +199,10 @@ const Dashboard = () => {
 
   // Fetch weather data for the selected date, time, and location
   const fetchWeatherData = async (lat, lon) => {
-    if (!navigator.onLine) {
-      router.push('/offline');
-      return;
-    }
+    // if (!navigator.onLine) {
+    //   router.push('/offline');
+    //   return;
+    // }
     setLoading(true);
     setIsCurrentWeather(false);
   
@@ -206,7 +274,7 @@ const Dashboard = () => {
     } catch (error) {
       // Check if the error is due to network issues
       if (!navigator.onLine || error.message.includes('Network Error')) {
-        router.push('/offline');
+        // router.push('/offline');
       } else {
         showErrorToast(`Failed to fetch weather data: ${error.response?.data?.message || error.message}`);
       }
@@ -310,6 +378,11 @@ const Dashboard = () => {
     fetchInitialForecastData();
   }, [showErrorToast]); // Add showErrorToast as dependency
   
+  
+  const handleTestOfflineClick = () => {
+    router.push('dashboard/dashboardcomp/testofflinedata');
+  };
+  
 
   return (
     <LocalizationProvider dateAdapter={AdapterDayjs}>
@@ -329,16 +402,20 @@ const Dashboard = () => {
            
           </div>
         </Grid>
-        {/* <Grid item xs={4} sm={6} sx={{ textAlign: 'right' }}>
+        <Grid item xs={4} sm={6} sx={{ textAlign: 'right' }}>
           <IconButton 
             sx={{ border: '1px solid lightgray', borderRadius: '20px', width: '56px', height: '56px', backgroundColor: 'white' }}
             onClick={ handleDownloadData}
           >
             <Badge badgeContent={0} color="error">
-              <CloudDownloadIcon sx={{ fontSize: '25px', color: 'black' }} />
+              <CloudDownloadIcon sx={{ fontSize: '25px', color: '#48ccb4' }} />
             </Badge>
           </IconButton>
-        </Grid> */}
+        </Grid>
+
+        <button onClick={handleTestOfflineClick}>
+      Go to Test Offline Data
+    </button>
 
 
         {/* Button to Open Drawer */}
@@ -370,7 +447,7 @@ const Dashboard = () => {
         {/* Greeting Message */}
         <Grid item xs={12}>
         <Typography variant="body2" color="#757575">
-          {greetingMessage}, <strong>Coconut Farmer&apos;s!</strong>
+          {greetingMessage}, <strong>Coconut Farmer&apos;s! sanaol</strong>
         </Typography>
 
           <Typography letterSpacing={4}></Typography>
@@ -457,25 +534,31 @@ const Dashboard = () => {
             />
           </Grid>
           <Grid item xs={12}>
-            <Button 
-              variant="contained" 
-              onClick={handleFetchCurrentWeather} 
-              sx={{ 
-                backgroundColor: '#48ccb4', 
-                borderRadius: '24px',
-                width: '100%', 
-                height: '55px', 
-                color: '#ffffff',
-                textTransform: 'none',
-                fontWeight: 'bold',
-                boxShadow: '0px 3px 5px rgba(0, 0, 0, 0.2)',
-                '&:hover': {
-                  backgroundColor: '#40b8a5',
-                },
-              }}
-            >
-              Check Today&apos;s Weather
-            </Button>
+          <Button 
+            variant="contained" 
+            onClick={handleFetchCurrentWeather} 
+            sx={{ 
+              backgroundColor: '#48ccb4', 
+              borderRadius: '24px',
+              width: '100%', 
+              height: '55px', 
+              color: '#ffffff',
+              textTransform: 'none',
+              fontWeight: 'bold',
+              boxShadow: '0px 3px 5px rgba(0, 0, 0, 0.2)',
+              '&:hover': {
+                backgroundColor: '#40b8a5',
+              },
+            }}
+            disabled={!isOnline}  // Disable button if offline
+          >
+            Check Current Weather
+          </Button>
+          {!isOnline && (
+            <Typography variant="body2" color="textSecondary" sx={{ marginTop: '8px', textAlign: 'center' }}>
+              Offline mode doesn't support real-time weather forecasting.
+            </Typography>
+          )}
           </Grid>
         </Grid>
 

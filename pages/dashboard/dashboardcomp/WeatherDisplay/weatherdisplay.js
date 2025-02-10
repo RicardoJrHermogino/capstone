@@ -108,7 +108,7 @@ const WeatherDisplay = ({
                 variant="h6"
                 sx={{ fontWeight: 'bold', color: '#757575', textAlign: 'center' }}
               >
-                No weather data. Please set your Location.
+                No weather data. Please select a Location.
               </Typography>
             </Grid>
           ) : (

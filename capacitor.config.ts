@@ -5,10 +5,15 @@ const config: CapacitorConfig = {
   appName: 'taskweathersync-smart-scheduler',
   webDir: 'out',
   bundledWebRuntime: false,
-  // server: {
-  //   url: 'http://10.0.0.38:3000', 
-  //   cleartext: true, 
-  // },
+  server: {
+    url: 'http://10.0.0.35:3000', 
+    cleartext: true, 
+  },
+  plugins: {
+    CapacitorSQLite: {
+      "iosDatabaseLocation": "Library/CapacitorDatabase"
+    }
+  }
 };
 
 export default config;

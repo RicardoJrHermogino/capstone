@@ -5,6 +5,7 @@ import { Toaster } from 'react-hot-toast';
 import { PollingProvider, usePolling } from "@/utils/WeatherPolling";
 import { LocationProvider } from '@/utils/LocationContext';
 import { useState, useEffect } from 'react';
+import { Capacitor } from '@capacitor/core';
 
 // Error Boundary Component
 function ErrorFallback({ error, resetErrorBoundary }) {
