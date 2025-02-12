@@ -1,3 +1,4 @@
+import { RiceBowlSharp } from '@mui/icons-material';
 import { isNightTime } from './WeatherIcon';
 
 // Function to map weather condition codes to readable strings

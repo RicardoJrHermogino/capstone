@@ -36,26 +36,26 @@ export const initDatabase = async () => {
 
      console.log('Database initialized successfully!');
 
-      // // Create tables
-      // await db.execute(
-      //   `CREATE TABLE IF NOT EXISTS coconut_tasks (
-      //     task_id INTEGER PRIMARY KEY AUTOINCREMENT,
-      //     task_name TEXT NOT NULL,
-      //     weatherRestrictions TEXT,
-      //     details TEXT,
-      //     requiredTemperature_min INTEGER,
-      //     requiredTemperature_max INTEGER,
-      //     idealHumidity_min INTEGER,
-      //     idealHumidity_max INTEGER,
-      //     requiredWindSpeed_max INTEGER,
-      //     requiredWindGust_max INTEGER,
-      //     requiredCloudCover_max INTEGER,
-      //     requiredPressure_min INTEGER,
-      //     requiredPressure_max INTEGER,
-      //     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      //     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      //   );`
-      // );
+      // Create tables
+      await db.execute(
+        `CREATE TABLE IF NOT EXISTS coconut_tasks (
+          task_id INTEGER PRIMARY KEY AUTOINCREMENT,
+          task_name TEXT NOT NULL,
+          weatherRestrictions TEXT,
+          details TEXT,
+          requiredTemperature_min INTEGER,
+          requiredTemperature_max INTEGER,
+          idealHumidity_min INTEGER,
+          idealHumidity_max INTEGER,
+          requiredWindSpeed_max INTEGER,
+          requiredWindGust_max INTEGER,
+          requiredCloudCover_max INTEGER,
+          requiredPressure_min INTEGER,
+          requiredPressure_max INTEGER,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );`
+      );
 
       await db.execute(
         `CREATE TABLE IF NOT EXISTS forecast_data (
@@ -78,19 +78,19 @@ export const initDatabase = async () => {
         );`
       );
 
-      // await db.execute(
-      //   `CREATE TABLE IF NOT EXISTS scheduled_tasks (
-      //     sched_id INTEGER PRIMARY KEY AUTOINCREMENT,
-      //     task_id INTEGER NOT NULL,
-      //     device_id TEXT NOT NULL,
-      //     location TEXT NOT NULL,
-      //     lat DECIMAL(10,8) NOT NULL,
-      //     lon DECIMAL(11,8) NOT NULL,
-      //     date DATE NOT NULL,
-      //     time TIME NOT NULL,
-      //     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      //   );`
-      // );
+      await db.execute(
+        `CREATE TABLE IF NOT EXISTS scheduled_tasks (
+          sched_id INTEGER PRIMARY KEY AUTOINCREMENT,
+          task_id INTEGER NOT NULL,
+          device_id TEXT NOT NULL,
+          location TEXT NOT NULL,
+          lat DECIMAL(10,8) NOT NULL,
+          lon DECIMAL(11,8) NOT NULL,
+          date DATE NOT NULL,
+          time TIME NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );`
+      );
 
       console.log('SQLite tables created successfully!');
 
@@ -126,47 +126,96 @@ const fetchAndStoreData = async (db) => {
 
     console.log(`Fetching data for deviceId: ${userId}`);
 
-    // const coconutTasksResponse = await fetch(`${API_BASE_URL}/api/coconut_tasks`);
-    // const coconutTasks = await coconutTasksResponse.json();
-
-    // for (const task of coconutTasks) {
-    //   await db.run(
-    //     `INSERT INTO coconut_tasks (task_id, task_name, weatherRestrictions, details, requiredTemperature_min, requiredTemperature_max, idealHumidity_min, idealHumidity_max, requiredWindSpeed_max, requiredWindGust_max, requiredCloudCover_max, requiredPressure_min, requiredPressure_max, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
-    //     [
-    //       task.task_id, task.task_name, task.weatherRestrictions, task.details,
-    //       task.requiredTemperature_min, task.requiredTemperature_max,
-    //       task.idealHumidity_min, task.idealHumidity_max,
-    //       task.requiredWindSpeed_max, task.requiredWindGust_max,
-    //       task.requiredCloudCover_max, task.requiredPressure_min,
-    //       task.requiredPressure_max, task.created_at, task.updated_at
-    //     ]
-    //   );
-    // }
-
-    // console.log('Coconut Tasks Data Synced Successfully!');
-
-    const forecastResponse = await fetch(`${API_BASE_URL}/api/getWeatherData`);
+    // Fetch and validate coconut tasks
+    const coconutTasksResponse = await fetch(`${API_BASE_URL}/api/coconut_tasks`);
+    if (!coconutTasksResponse.ok) {
+      throw new Error(`HTTP error! status: ${coconutTasksResponse.status}`);
+    }
     
-    if (!forecastResponse.ok) {
-      const errorText = await forecastResponse.text();
-      console.error('Error response text:', errorText);
-      throw new Error(`HTTP error! status: ${forecastResponse.status}, message: ${errorText}`);
+    const coconutTasksData = await coconutTasksResponse.json();
+    const coconutTasks = Array.isArray(coconutTasksData.coconut_tasks) ? coconutTasksData.coconut_tasks : [];
+    
+    if (coconutTasks.length === 0) {
+      console.warn('No coconut tasks data received');
     }
 
-    const forecastData = await forecastResponse.json();
-    console.log(`Fetched ${forecastData.length} forecast records`);
-
     // Clear existing data before inserting new data
+    await db.execute('DELETE FROM coconut_tasks');
+
+    for (const task of coconutTasks) {
+      try {
+        await db.run(
+          `INSERT INTO coconut_tasks (task_id, task_name, weatherRestrictions, details, 
+            requiredTemperature_min, requiredTemperature_max, idealHumidity_min, 
+            idealHumidity_max, requiredWindSpeed_max, requiredWindGust_max, 
+            requiredCloudCover_max, requiredPressure_min, requiredPressure_max, 
+            created_at, updated_at) 
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+          [
+            task.task_id || null,
+            task.task_name || '',
+            task.weatherRestrictions || '',
+            task.details || '',
+            task.requiredTemperature_min || null,
+            task.requiredTemperature_max || null,
+            task.idealHumidity_min || null,
+            task.idealHumidity_max || null,
+            task.requiredWindSpeed_max || null,
+            task.requiredWindGust_max || null,
+            task.requiredCloudCover_max || null,
+            task.requiredPressure_min || null,
+            task.requiredPressure_max || null,
+            task.created_at || new Date().toISOString(),
+            task.updated_at || new Date().toISOString()
+          ]
+        );
+      } catch (insertError) {
+        console.error(`Error inserting coconut task:`, insertError);
+      }
+    }
+
+    console.log('Coconut Tasks Data Synced Successfully!');
+
+    // Fetch and validate forecast data
+    const forecastResponse = await fetch(`${API_BASE_URL}/api/getWeatherData`);
+    if (!forecastResponse.ok) {
+      throw new Error(`HTTP error! status: ${forecastResponse.status}`);
+    }
+
+    const forecastDataResponse = await forecastResponse.json();
+    const forecastData = Array.isArray(forecastDataResponse) ? forecastDataResponse : [];
+
+    if (forecastData.length === 0) {
+      console.warn('No forecast data received');
+    }
+
+    // Clear existing forecast data
     await db.execute('DELETE FROM forecast_data');
 
     for (const forecast of forecastData) {
       try {
         await db.run(
-          `INSERT INTO forecast_data (weather_data_id, location, lat, lon, date, time, temperature, weather_id, pressure, humidity, clouds, wind_speed, wind_gust, created_at, pop, rain_3h) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+          `INSERT INTO forecast_data (weather_data_id, location, lat, lon, date, 
+            time, temperature, weather_id, pressure, humidity, clouds, wind_speed, 
+            wind_gust, created_at, pop, rain_3h) 
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
           [
-            forecast.weather_data_id, forecast.location, forecast.lat, forecast.lon, forecast.date, forecast.time,
-            forecast.temperature, forecast.weather_id, forecast.pressure, forecast.humidity,
-            forecast.clouds, forecast.wind_speed, forecast.wind_gust, forecast.created_at, forecast.pop, forecast.rain_3h
+            forecast.weather_data_id || null,
+            forecast.location || '',
+            forecast.lat || null,
+            forecast.lon || null,
+            forecast.date || null,
+            forecast.time || null,
+            forecast.temperature || null,
+            forecast.weather_id || null,
+            forecast.pressure || null,
+            forecast.humidity || null,
+            forecast.clouds || null,
+            forecast.wind_speed || null,
+            forecast.wind_gust || null,
+            forecast.created_at || new Date().toISOString(),
+            forecast.pop || null,
+            forecast.rain_3h || null
           ]
         );
       } catch (insertError) {
@@ -176,21 +225,48 @@ const fetchAndStoreData = async (db) => {
 
     console.log('Forecast Data Synced Successfully!');
 
-    // const scheduledTasksResponse = await fetch(`${API_BASE_URL}/api/getScheduledTasks?deviceId=${userId}`);
-    // const scheduledTasks = await scheduledTasksResponse.json();
+    // Fetch and validate scheduled tasks
+    const scheduledTasksResponse = await fetch(`${API_BASE_URL}/api/getScheduledTasks?deviceId=${userId}`);
+    if (!scheduledTasksResponse.ok) {
+      throw new Error(`HTTP error! status: ${scheduledTasksResponse.status}`);
+    }
 
-    // for (const task of scheduledTasks) {
-    //   await db.run(
-    //     `INSERT INTO scheduled_tasks (sched_id, task_id, device_id, location, lat, lon, date, time, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
-    //     [
-    //       task.sched_id, task.task_id, task.device_id, task.location,
-    //       task.lat, task.lon, task.date, task.time, task.created_at
-    //     ]
-    //   );
-    // }
+    const scheduledTasksData = await scheduledTasksResponse.json();
+    const scheduledTasks = Array.isArray(scheduledTasksData) ? scheduledTasksData : [];
 
-    // console.log('Scheduled Tasks Data Synced Successfully!');
+    if (scheduledTasks.length === 0) {
+      console.warn('No scheduled tasks data received');
+    }
+
+    // Clear existing scheduled tasks
+    await db.execute('DELETE FROM scheduled_tasks');
+
+    for (const task of scheduledTasks) {
+      try {
+        await db.run(
+          `INSERT INTO scheduled_tasks (sched_id, task_id, device_id, location, 
+            lat, lon, date, time, created_at) 
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+          [
+            task.sched_id || null,
+            task.task_id || null,
+            task.device_id || '',
+            task.location || '',
+            task.lat || null,
+            task.lon || null,
+            task.date || null,
+            task.time || null,
+            task.created_at || new Date().toISOString()
+          ]
+        );
+      } catch (insertError) {
+        console.error(`Error inserting scheduled task:`, insertError);
+      }
+    }
+
+    console.log('Scheduled Tasks Data Synced Successfully!');
   } catch (error) {
-    console.error('Error fetching and storing data:', error);
+    console.error('Error in fetchAndStoreData:', error);
+    throw error; // Re-throw the error to be handled by the calling function
   }
 };
