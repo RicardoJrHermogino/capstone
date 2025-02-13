@@ -14,9 +14,9 @@ export const PollingProvider = ({ children }) => {
     firstFetchTime: null,
   });
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [isOffline, setIsOffline] = useState(false);  // Track offline state
 
-  // Function to show error toast
+  // Function to show error toast (you can keep this if you want to notify users about being offline)
   const showFetchLimitToast = () => {
     toast.error('This is the most up-to-date data. Please try again later.', {
       duration: 4000,
@@ -52,6 +52,11 @@ export const PollingProvider = ({ children }) => {
 
   // Memoized fetch weather data function
   const fetchWeatherData = useCallback(async () => {
+    if (isOffline) {
+      console.log("User is offline. Skipping fetch.");
+      return; // Skip fetching if the user is offline
+    }
+
     const now = Date.now();
     
     setFetchData(prev => {
@@ -73,7 +78,6 @@ export const PollingProvider = ({ children }) => {
       }
 
       setIsLoading(true);
-      setError(null);
 
       fetch(`${API_BASE_URL}/api/fetchWeatherData`, {
         method: 'POST',
@@ -101,43 +105,38 @@ export const PollingProvider = ({ children }) => {
           });
         })
         .catch(error => {
-          console.error('Error fetching weather data:', error);
-          setError(error.message);
+          console.error('Error fetching weather data:', error); // Log error to console
+
+          // Handle offline state and avoid showing any error UI
+          if (error.message === 'Failed to fetch') {
+            setIsOffline(true);  // Mark the user as offline
+          }
+
           setIsLoading(false);
-          
-          toast.error(
-            error.message === 'Failed to fetch' 
-              ? 'Unable to connect to weather service. Please check your connection.'
-              : 'An error occurred while fetching weather data.',
-            {
-              duration: 4000,
-              style: {
-                borderRadius: '30px',
-                fontSize: '16px',
-                boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-              },
-            }
-          );
         });
 
       return { count: newCount + 1, firstFetchTime: newFirstFetchTime };
     });
-  }, []);
+  }, [isOffline]);  // Depend on `isOffline` to stop fetching when offline
 
   // Set up polling
   useEffect(() => {
     // Initial fetch
     fetchWeatherData();
 
-    // Set up interval for polling every 5 minutes
-    const intervalId = setInterval(fetchWeatherData, 300000);
+    // Set up interval for polling every 5 minutes (if not offline)
+    const intervalId = setInterval(() => {
+      if (!isOffline) {
+        fetchWeatherData();
+      }
+    }, 300000);  // 5 minutes
 
     // Cleanup interval on unmount
     return () => clearInterval(intervalId);
-  }, [fetchWeatherData]);
+  }, [fetchWeatherData, isOffline]);
 
   return (
-    <PollingContext.Provider value={{ fetchWeatherData, isLoading, error }}>
+    <PollingContext.Provider value={{ fetchWeatherData, isLoading, isOffline }}>
       {children}
     </PollingContext.Provider>
   );

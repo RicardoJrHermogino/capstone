@@ -1,68 +1,100 @@
-import React, { useState, useEffect } from 'react';
-import {
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  Grid,
-  OutlinedInput,
-  InputAdornment,
-} from "@mui/material";
+import React, { useState, useEffect, useCallback } from "react";
+import { FormControl, InputLabel, Select, MenuItem, Grid, OutlinedInput, InputAdornment } from "@mui/material";
 import CalendarTodayIcon from "@mui/icons-material/CalendarToday";
 import dayjs from "dayjs";
-import axios from 'axios';
-import API_BASE_URL from '@/config/apiConfig';
+import axios from "axios";
+import { getDatabaseConnection } from "@/utils/sqliteService";  // Import the getDatabaseConnection function
+import API_BASE_URL from "@/config/apiConfig";
+
+const FETCH_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
 const DatePicker = ({ selectedDate, setSelectedDate, MenuProps }) => {
   const [availableDates, setAvailableDates] = useState([]);
-  const currentDate = dayjs().format('YYYY-MM-DD');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const currentDate = dayjs().format("YYYY-MM-DD");
 
-  useEffect(() => {
-    const fetchAvailableDates = async () => {
-      try {
-        // Make the API request to fetch weather data (without including credentials)
-        const response = await axios.get(`${API_BASE_URL}/api/getWeatherData`, {
-          headers: {
-            // Optionally add any headers here if needed (e.g., Authorization)
-          },
-        });
+  // Function to fetch available dates from API
+  const fetchAvailableDatesApi = useCallback(async () => {
+    setLoading(true);
+    try {
+      const lastFetchTime = localStorage.getItem("last_fetch_time");
+      const now = Date.now();
 
-        const forecastData = response.data;
+      // Only fetch if more than 5 minutes have passed since last fetch
+      if (lastFetchTime && now - parseInt(lastFetchTime) < FETCH_INTERVAL) {
+        setLoading(false);
+        return;
+      }
 
-        // Extract unique dates from the forecast data and filter out past dates
-        const uniqueDates = [...new Set(forecastData.map(item => 
-          dayjs(item.date).format('YYYY-MM-DD')
-        ))]
-        .filter(date => {
-          return !dayjs(date).isBefore(dayjs(), 'day'); // Keep only future or today’s dates
-        })
-        .sort(); // Sort dates in ascending order
+      const response = await axios.get(`${API_BASE_URL}/api/getWeatherData`);
+      const forecastData = response.data;
 
-        console.log('Available dates:', uniqueDates);
+      const uniqueDates = [...new Set(forecastData.map((item) => dayjs(item.date).format("YYYY-MM-DD")))]
+        .filter((date) => !dayjs(date).isBefore(currentDate, "day"))
+        .sort();
 
+      console.log("Available dates (API):", uniqueDates);
+
+      if (JSON.stringify(uniqueDates) !== JSON.stringify(availableDates)) {
         setAvailableDates(uniqueDates);
+        localStorage.setItem("forecast_dates", JSON.stringify(uniqueDates));
+        localStorage.setItem("last_fetch_time", now.toString()); // Update fetch timestamp
 
-        // If selected date is not in available dates, select the first available date
         if (!uniqueDates.includes(selectedDate)) {
-          setSelectedDate(uniqueDates[0] || '');
-        }
-      } catch (error) {
-        console.error('Error fetching available dates:', error);
-
-        // Fallback to next 6 days if API fails
-        const fallbackDates = Array.from({ length: 6 }, (_, i) =>
-          dayjs().add(i, "day").format("YYYY-MM-DD")
-        );
-        setAvailableDates(fallbackDates);
-
-        if (!selectedDate || !fallbackDates.includes(selectedDate)) {
-          setSelectedDate(fallbackDates[0]);
+          setSelectedDate(uniqueDates[0] || "");
         }
       }
-    };
+    } catch (error) {
+      console.error("API fetch failed, switching to offline mode:", error);
+      fetchAvailableDatesOffline();
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedDate, setSelectedDate, availableDates]);
 
-    fetchAvailableDates();
+  // Function to fetch available dates from SQLite
+  const fetchAvailableDatesOffline = useCallback(async () => {
+    setLoading(true);
+    try {
+      const db = await getDatabaseConnection();  // Use the shared database connection
+
+      const result = await db.query("SELECT DISTINCT date FROM forecast_data WHERE date >= ?", [currentDate]);
+
+      if (result.values?.length > 0) {
+        const dates = result.values.map((row) => row.date);
+        console.log("Available dates (Offline):", dates);
+        setAvailableDates(dates);
+
+        if (!selectedDate || !dates.includes(selectedDate)) {
+          setSelectedDate(dates[0] || "");
+        }
+      } else {
+        setError("No forecast data found in SQLite");
+      }
+    } catch (error) {
+      console.error("Error fetching data from SQLite:", error);
+      setError("Error fetching available dates");
+    } finally {
+      setLoading(false);
+    }
   }, [selectedDate, setSelectedDate]);
+
+  // Load offline data first and then fetch API in background
+  useEffect(() => {
+    fetchAvailableDatesOffline();
+    fetchAvailableDatesApi();
+
+    // Poll API every 5 minutes to keep data fresh
+    const interval = setInterval(() => {
+      fetchAvailableDatesApi();
+    }, FETCH_INTERVAL);
+
+    return () => clearInterval(interval);
+  }, [fetchAvailableDatesApi, fetchAvailableDatesOffline]);
+
+  if (loading) return <div>Loading...</div>;
+  if (error) return <div style={{ color: "red" }}>Error: {error}</div>;
 
   return (
     <Grid item xs={12} sm={12} align="center">
@@ -73,7 +105,7 @@ const DatePicker = ({ selectedDate, setSelectedDate, MenuProps }) => {
           value={selectedDate}
           onChange={(e) => setSelectedDate(e.target.value)}
           label="Date"
-          input={(
+          input={
             <OutlinedInput
               label="Date"
               startAdornment={
@@ -82,33 +114,14 @@ const DatePicker = ({ selectedDate, setSelectedDate, MenuProps }) => {
                 </InputAdornment>
               }
             />
-          )}
+          }
           MenuProps={{
             PaperProps: {
-              style: {
-                maxHeight: '390px',
-                overflowY: 'auto',
-                marginTop: '0',
-              },
+              style: { maxHeight: "390px", overflowY: "auto", marginTop: "0" },
             },
-            anchorOrigin: {
-              vertical: 'top',
-              horizontal: 'left',
-            },
-            transformOrigin: {
-              vertical: 'bottom',
-              horizontal: 'left',
-            },
+            anchorOrigin: { vertical: "top", horizontal: "left" },
+            transformOrigin: { vertical: "bottom", horizontal: "left" },
             ...MenuProps,
-          }}
-          sx={{
-            '& .MuiOutlinedInput-root': {
-              borderRadius: '10px',
-            },
-            '& fieldset': {
-              borderRadius: '10px',
-            },
-            backgroundColor: '#f5f7fa',
           }}
         >
           {availableDates.map((date) => (

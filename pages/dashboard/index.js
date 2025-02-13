@@ -25,6 +25,11 @@ import API_BASE_URL from '@/config/apiConfig';
 
 import { initDatabase } from '@/utils/offlineDatabase';
 import { Preferences } from '@capacitor/preferences'; // Add this import
+import { SQLiteConnection, CapacitorSQLite } from '@capacitor-community/sqlite';
+
+
+
+
 
 
 const Dashboard = () => {
@@ -41,6 +46,8 @@ const Dashboard = () => {
   const [submittedDate, setSubmittedDate] = useState("");
   const [submittedTime, setSubmittedTime] = useState("");
 
+  const [isOfflineMode, setIsOfflineMode] = useState(false);
+
 
   const [currentWeatherData, setCurrentWeatherData] = useState(null);
   const [isCurrentWeather, setIsCurrentWeather] = useState(true); 
@@ -54,6 +61,68 @@ const Dashboard = () => {
   const TOAST_COOLDOWN = 5000; // 2 seconds cooldown between toasts
   const [isOnline, setIsOnline] = useState(true);
   const router = useRouter();
+
+   // New function to fetch offline weather data
+   const fetchOfflineWeatherData = async (selectedLocation, selectedDateTime) => {
+    const { value: isDataDownloaded } = await Preferences.get({ key: 'offlineDataDownloaded' });
+    
+    if (!isDataDownloaded) {
+      showErrorToast('Please download offline data first');
+      return null;
+    }
+
+    if (Capacitor.getPlatform() !== 'web') {
+      const sqliteConnection = new SQLiteConnection(CapacitorSQLite);
+
+      try {
+        // Close and delete any existing connections
+        try {
+          await sqliteConnection.closeConnection('offline_db');
+          await sqliteConnection.deleteConnection('offline_db');
+        } catch (error) {
+          console.warn('Error cleaning up connections:', error);
+        }
+
+        // Create and open new connection
+        const db = await sqliteConnection.createConnection(
+          'offline_db',
+          false,
+          'no-encryption',
+          1,
+          false
+        );
+        await db.open();
+
+        // Format the date and time for query
+        const formattedDate = selectedDateTime.format('YYYY-MM-DD');
+        const formattedTime = selectedDateTime.format('HH:mm:ss');
+
+        // Query the offline database
+        const query = `
+          SELECT * FROM forecast_data 
+          WHERE location = ? 
+          AND date = ? 
+          AND time = ?
+        `;
+        const result = await db.query(query, [selectedLocation, formattedDate, formattedTime]);
+
+        await sqliteConnection.closeConnection('offline_db');
+
+        if (result.values?.length > 0) {
+          return result.values[0];
+        }
+        return null;
+      } catch (error) {
+        console.error('Error fetching offline data:', error);
+        showErrorToast(`Error accessing offline data: ${error.message}`);
+        return null;
+      }
+    } else {
+      showErrorToast('Offline mode not supported in web browser');
+      return null;
+    }
+  };
+
 
   useEffect(() => {
     const handleOnlineStatus = () => {
@@ -199,18 +268,12 @@ const Dashboard = () => {
 
   // Fetch weather data for the selected date, time, and location
   const fetchWeatherData = async (lat, lon) => {
-    // if (!navigator.onLine) {
-    //   router.push('/offline');
-    //   return;
-    // }
     setLoading(true);
     setIsCurrentWeather(false);
-  
+
     try {
-      await new Promise(resolve => setTimeout(resolve, 500));
-      const response = await axios.get(`${API_BASE_URL}/api/getWeatherData`).catch(function (e) {
-        setError(e)
-      });
+      // Try online API first
+      const response = await axios.get(`${API_BASE_URL}/api/getWeatherData`);
       const forecastData = response.data;
       
 
@@ -271,12 +334,29 @@ const Dashboard = () => {
       } else {
         showErrorToast("No weather data available for the selected time and location.");
       }
-    } catch (error) {
-      // Check if the error is due to network issues
-      if (!navigator.onLine || error.message.includes('Network Error')) {
-        // router.push('/offline');
+    }  catch (error) {
+      console.log('API call failed, switching to offline mode');
+      setIsOfflineMode(true);
+
+      // Try fetching offline data
+      const offlineData = await fetchOfflineWeatherData(location, dayjs(`${selectedDate} ${selectedTime}`));
+      
+      if (offlineData) {
+        setWeatherId(offlineData.weather_id);
+        setWeatherData({
+          temperature: offlineData.temperature,
+          pressure: offlineData.pressure,
+          humidity: offlineData.humidity,
+          clouds: offlineData.clouds,
+          wind_speed: offlineData.wind_speed,
+          wind_gust: offlineData.wind_gust,
+          pop: offlineData.pop,
+          rain3h: offlineData.rain_3h
+        });
+        setTemperature(Math.round(offlineData.temperature));
+        showSuccessToast("Showing offline weather data");
       } else {
-        showErrorToast(`Failed to fetch weather data: ${error.response?.data?.message || error.message}`);
+        showErrorToast("No offline data available for selected time and location");
       }
     } finally {
       setLoading(false);
@@ -452,6 +532,21 @@ const Dashboard = () => {
 
           <Typography letterSpacing={4}></Typography>
         </Grid>
+
+        {isOfflineMode && (
+        <Typography 
+          variant="body2" 
+          sx={{ 
+            backgroundColor: '#fff3cd', 
+            color: '#856404', 
+            padding: '8px', 
+            borderRadius: '4px',
+            marginTop: '8px'
+          }}
+        >
+          Currently in offline mode. Showing locally stored weather data.
+        </Typography>
+      )}
 
         {/* Weather Display Component */}
         

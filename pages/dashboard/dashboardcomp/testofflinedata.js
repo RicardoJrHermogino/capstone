@@ -1,84 +1,37 @@
 import { useEffect, useState } from 'react';
-import { SQLiteConnection, CapacitorSQLite } from '@capacitor-community/sqlite';
 import { Capacitor } from '@capacitor/core';
 import { Preferences } from '@capacitor/preferences';
-import { 
-  Card, 
-  CardContent, 
-  Tabs, 
-  Tab, 
-  Box, 
-  Typography, 
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Paper
-} from '@mui/material';
+import { Box, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Typography, Card, CardContent, AppBar, Toolbar, IconButton } from '@mui/material';
+import MenuIcon from '@mui/icons-material/Menu';
+import { getDatabaseConnection, closeDatabaseConnection } from '@/utils/sqliteService';
 
 const ForecastPage = () => {
   const [forecastData, setForecastData] = useState([]);
-  const [scheduledTasks, setScheduledTasks] = useState([]);
-  const [coconutTasks, setCoconutTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [activeTab, setActiveTab] = useState(0);
 
   useEffect(() => {
-    const fetchAllData = async () => {
+    const fetchForecastData = async () => {
       const { value: isDataDownloaded } = await Preferences.get({ key: 'offlineDataDownloaded' });
-      
+  
       if (!isDataDownloaded) {
         setError('Please download offline data first');
         setLoading(false);
         return;
       }
-
+  
       if (Capacitor.getPlatform() !== 'web') {
-        const sqliteConnection = new SQLiteConnection(CapacitorSQLite);
-
         try {
-          try {
-            await sqliteConnection.closeConnection('offline_db');
-          } catch (closeError) {
-            console.warn('Error closing existing connection:', closeError);
-          }
-
-          try {
-            await sqliteConnection.deleteConnection('offline_db');
-          } catch (deleteError) {
-            console.warn('Error deleting existing connection:', deleteError);
-          }
-
-          const db = await sqliteConnection.createConnection(
-            'offline_db', 
-            false, 
-            'no-encryption', 
-            1,
-            false
-          );
-
-          await db.open();
-
+          // Get database connection using the service
+          const db = await getDatabaseConnection();
+  
+          // Query only the forecast data
           const forecastResult = await db.query('SELECT * FROM forecast_data');
-          const scheduledResult = await db.query('SELECT * FROM scheduled_tasks');
-          const coconutResult = await db.query('SELECT * FROM coconut_tasks');
-
+  
           if (forecastResult.values?.length > 0) {
             setForecastData(forecastResult.values);
+            console.log('Forecast Data:', forecastResult.values);
           }
-          
-          if (scheduledResult.values?.length > 0) {
-            setScheduledTasks(scheduledResult.values);
-          }
-          
-          if (coconutResult.values?.length > 0) {
-            setCoconutTasks(coconutResult.values);
-          }
-
-          await sqliteConnection.closeConnection('offline_db');
         } catch (error) {
           console.error('Error fetching data:', error);
           setError(`Error fetching data: ${error.message}`);
@@ -90,13 +43,14 @@ const ForecastPage = () => {
         setLoading(false);
       }
     };
+  
+    fetchForecastData();
 
-    fetchAllData();
+    // Cleanup function to close the database connection when component unmounts
+    return () => {
+      closeDatabaseConnection();
+    };
   }, []);
-
-  const handleTabChange = (event, newValue) => {
-    setActiveTab(newValue);
-  };
 
   if (loading) {
     return <Box p={4}>Loading...</Box>;
@@ -108,123 +62,76 @@ const ForecastPage = () => {
 
   return (
     <Box p={4}>
-      <Tabs value={activeTab} onChange={handleTabChange} sx={{ mb: 2 }}>
-        <Tab label="Weather Forecast" />
-        <Tab label="Scheduled Tasks" />
-        <Tab label="Coconut Tasks" />
-      </Tabs>
+      <AppBar position="sticky">
+        <Toolbar>
+          <IconButton edge="start" color="inherit" aria-label="menu" sx={{ mr: 2 }}>
+            <MenuIcon />
+          </IconButton>
+          <Typography variant="h6" sx={{ flexGrow: 1 }}>
+            Weather Forecast
+          </Typography>
+        </Toolbar>
+      </AppBar>
 
-      <TabPanel value={activeTab} index={0}>
-        <Card>
-          <CardContent>
-            <Typography variant="h6" gutterBottom>Weather Forecast Data</Typography>
-            <TableContainer component={Paper}>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Location</TableCell>
-                    <TableCell>Date</TableCell>
-                    <TableCell>Time</TableCell>
-                    <TableCell>Temperature</TableCell>
-                    <TableCell>Pressure</TableCell>
-                    <TableCell>Humidity</TableCell>
+      <Card sx={{ mt: 2 }}>
+        <CardContent>
+          <Typography variant="h6" gutterBottom>Weather Forecast Data</Typography>
+          <TableContainer component={Paper}>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Weather Data ID</TableCell>
+                  <TableCell>Location</TableCell>
+                  <TableCell>Latitude</TableCell>
+                  <TableCell>Longitude</TableCell>
+                  <TableCell>Date</TableCell>
+                  <TableCell>Time</TableCell>
+                  <TableCell>Temperature</TableCell>
+                  <TableCell>Weather ID</TableCell>
+                  <TableCell>Pressure</TableCell>
+                  <TableCell>Humidity</TableCell>
+                  <TableCell>Clouds</TableCell>
+                  <TableCell>Wind Speed</TableCell>
+                  <TableCell>Wind Gust</TableCell>
+                  <TableCell>Created At</TableCell>
+                  <TableCell>Probability of Precipitation (POP)</TableCell>
+                  <TableCell>Rain in Last 3 Hours</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {forecastData.map((data, index) => (
+                  <TableRow key={index} hover>
+                    <TableCell>{data.weather_data_id}</TableCell>
+                    <TableCell>{data.location}</TableCell>
+                    <TableCell>{data.lat}</TableCell>
+                    <TableCell>{data.lon}</TableCell>
+                    <TableCell>{data.date}</TableCell>
+                    <TableCell>{data.time}</TableCell>
+                    <TableCell>{data.temperature}°C</TableCell>
+                    <TableCell>{data.weather_id}</TableCell>
+                    <TableCell>{data.pressure} hPa</TableCell>
+                    <TableCell>{data.humidity}%</TableCell>
+                    <TableCell>{data.clouds}%</TableCell>
+                    <TableCell>{data.wind_speed} m/s</TableCell>
+                    <TableCell>{data.wind_gust} m/s</TableCell>
+                    <TableCell>{data.created_at}</TableCell>
+                    <TableCell>{data.pop}%</TableCell>
+                    <TableCell>{data.rain_3h} mm</TableCell>
                   </TableRow>
-                </TableHead>
-                <TableBody>
-                  {forecastData.map((data, index) => (
-                    <TableRow key={index} hover>
-                      <TableCell>{data.location}</TableCell>
-                      <TableCell>{data.date}</TableCell>
-                      <TableCell>{data.time}</TableCell>
-                      <TableCell>{data.temperature}°C</TableCell>
-                      <TableCell>{data.pressure} hPa</TableCell>
-                      <TableCell>{data.humidity}%</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </CardContent>
-        </Card>
-      </TabPanel>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </CardContent>
 
-      <TabPanel value={activeTab} index={1}>
-        <Card>
-          <CardContent>
-            <Typography variant="h6" gutterBottom>Scheduled Tasks</Typography>
-            <TableContainer component={Paper}>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Task ID</TableCell>
-                    <TableCell>Location</TableCell>
-                    <TableCell>Date</TableCell>
-                    <TableCell>Time</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {scheduledTasks.map((task, index) => (
-                    <TableRow key={index} hover>
-                      <TableCell>{task.task_id}</TableCell>
-                      <TableCell>{task.location}</TableCell>
-                      <TableCell>{task.date}</TableCell>
-                      <TableCell>{task.time}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </CardContent>
-        </Card>
-      </TabPanel>
-
-      <TabPanel value={activeTab} index={2}>
-        <Card>
-          <CardContent>
-            <Typography variant="h6" gutterBottom>Coconut Tasks</Typography>
-            <TableContainer component={Paper}>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Task Name</TableCell>
-                    <TableCell>Details</TableCell>
-                    <TableCell>Temperature Range</TableCell>
-                    <TableCell>Humidity Range</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {coconutTasks.map((task, index) => (
-                    <TableRow key={index} hover>
-                      <TableCell>{task.task_name}</TableCell>
-                      <TableCell>{task.details}</TableCell>
-                      <TableCell>{task.requiredTemperature_min}°C - {task.requiredTemperature_max}°C</TableCell>
-                      <TableCell>{task.idealHumidity_min}% - {task.idealHumidity_max}%</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </CardContent>
-        </Card>
-      </TabPanel>
+        {forecastData.length > 0 && (
+          <Box p={4}>
+            <Typography variant="h6">Preview of Forecast Data Structure</Typography>
+            <pre>{JSON.stringify(forecastData[0], null, 2)}</pre>
+          </Box>
+        )}
+      </Card>
     </Box>
-  );
-};
-
-// Helper component for tab panels
-const TabPanel = (props) => {
-  const { children, value, index, ...other } = props;
-
-  return (
-    <div
-      role="tabpanel"
-      hidden={value !== index}
-      {...other}
-    >
-      {value === index && (
-        <Box>{children}</Box>
-      )}
-    </div>
   );
 };
 
