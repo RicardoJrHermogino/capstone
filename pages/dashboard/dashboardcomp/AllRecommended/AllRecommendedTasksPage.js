@@ -1,4 +1,3 @@
-// AllRecommendedTasksPage.js
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Container, 
@@ -9,7 +8,7 @@ import {
   Tabs,
   Tab,
   ThemeProvider,
-  createTheme,  // Add this import
+  createTheme,
   useTheme,
   useMediaQuery,
   Grid,
@@ -17,11 +16,16 @@ import {
 } from '@mui/material';
 import ArrowBackIosIcon from '@mui/icons-material/ArrowBackIos';
 import { useRouter } from 'next/router';
+import { Preferences } from '@capacitor/preferences';
+import axios from 'axios';
 import { locationCoordinates } from '@/utils/locationCoordinates';
 import TaskModal from './TaskDialog';
 import { TaskLoadingPlaceholder } from './TaskLoadingPlaceholder';
 import { IntervalWeatherSummary } from './IntervalWeatherSummary';
 import API_BASE_URL from '@/config/apiConfig';
+
+const OPENWEATHER_URL = "https://httpbin.org/get";
+
 
 // Create a basic theme instance with just the colors we need
 const defaultTheme = createTheme({
@@ -122,10 +126,47 @@ const AllRecommendedTasksPage = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedTabIndex, setSelectedTabIndex] = useState(0);
+  const [isOffline, setIsOffline] = useState(false);
   const theme = useTheme();
-  const isSmallScreen = useMediaQuery(theme.breakpoints.down('sm'));  // Add these state variables after other useState declarations
+  const isSmallScreen = useMediaQuery(theme.breakpoints.down('sm'));
   const [selectedTask, setSelectedTask] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+
+
+   // Check online status
+   const checkOnlineStatus = useCallback(async () => {
+    try {
+      await axios.get(OPENWEATHER_URL);
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }, []);
+
+  // Get tasks from Preferences
+  const getOfflineTasks = useCallback(async () => {
+    try {
+      const { value } = await Preferences.get({ key: 'coconut_tasks' });
+      return value ? JSON.parse(value) : [];
+    } catch (error) {
+      console.error('Error reading offline tasks:', error);
+      return [];
+    }
+  }, []);
+
+
+
+
+  // Get weather data from Preferences
+  const getOfflineWeather = useCallback(async () => {
+    try {
+      const { value } = await Preferences.get({ key: 'forecast_data' });
+      return value ? JSON.parse(value) : [];
+    } catch (error) {
+      console.error('Error reading offline weather:', error);
+      return [];
+    }
+  }, []);
 
   const getRecommendedTasks = useCallback((weatherData, tasks) => {
     try {
@@ -288,25 +329,46 @@ const AllRecommendedTasksPage = () => {
   }, []);
 
   // Fetch tasks effect
+  // Fetch tasks effect with offline support
   useEffect(() => {
     const fetchTasks = async () => {
       setIsLoading(true);
-      setError(null);
       try {
-        const response = await fetch(`${API_BASE_URL}/api/coconut_tasks`);
-        if (!response.ok) {
-          throw new Error(`Failed to fetch tasks: ${response.status}`);
+        const isOnline = await checkOnlineStatus();
+        setIsOffline(!isOnline);
+
+        let tasks;
+        if (isOnline) {
+          console.log('📡 Device is online - fetching tasks from API...');
+          const response = await fetch(`${API_BASE_URL}/api/coconut_tasks`);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch tasks: ${response.status}`);
+          }
+          const data = await response.json();
+          tasks = data.coconut_tasks;
+          console.log(`✅ Successfully fetched ${tasks.length} tasks from API`);
+
+          // Cache the fresh data
+        } else {
+          console.log('📱 Device is offline - retrieving tasks from storage...');
+          tasks = await getOfflineTasks();
         }
-        const data = await response.json();
-        if (!Array.isArray(data.coconut_tasks)) {
+
+        if (!Array.isArray(tasks)) {
           throw new Error('Invalid tasks data format');
         }
-        setFetchedTasks(data.coconut_tasks);
+        setFetchedTasks(tasks);
       } catch (error) {
-        setError(error.message);
-        const cachedTasks = localStorage.getItem('lastRecommendedTasks');
-        if (cachedTasks) {
-          setRecommendedTasksByInterval(JSON.parse(cachedTasks));
+        console.error('Error fetching tasks:', error);
+        
+        // Try to get cached tasks as fallback
+        try {
+          const cachedTasks = await getOfflineTasks();
+          if (Array.isArray(cachedTasks) && cachedTasks.length > 0) {
+            setFetchedTasks(cachedTasks);
+          }
+        } catch (fallbackError) {
+          setError('Unable to load tasks. Please check your connection.');
         }
       } finally {
         setIsLoading(false);
@@ -314,7 +376,7 @@ const AllRecommendedTasksPage = () => {
     };
 
     fetchTasks();
-  }, []);
+  }, [checkOnlineStatus, getOfflineTasks]);
 
   // Weather and recommendations effect
   useEffect(() => {
@@ -348,12 +410,21 @@ const AllRecommendedTasksPage = () => {
             localStorage.setItem('lastRecommendedTasks', JSON.stringify(newInterval));
           }
         } else if (selectedDate) {
-          const response = await fetch(
-            `${API_BASE_URL}/api/getWeatherData?location=${encodeURIComponent(parsedLocation)}&date=${selectedDate}`
-          );
+          let weatherData;
+          const isOnline = await checkOnlineStatus();
 
-          if (!response.ok) throw new Error(`Database fetch error: ${response.status}`);
-          const data = await response.json();
+          if (isOnline) {
+            console.log('📡 Device is online - fetching weather from API...');
+            const response = await fetch(
+              `${API_BASE_URL}/api/getWeatherData?location=${encodeURIComponent(parsedLocation)}&date=${selectedDate}`
+            );
+            if (!response.ok) throw new Error(`Database fetch error: ${response.status}`);
+            weatherData = await response.json();
+            
+          } else {
+            console.log('📱 Device is offline - retrieving weather from storage...');
+            weatherData = await getOfflineWeather();
+          }
 
           const normalizedSelectedDate = new Date(selectedDate).toISOString().split('T')[0];
           const selectedDateObj = new Date(selectedDate);
@@ -370,7 +441,7 @@ const AllRecommendedTasksPage = () => {
               })
             : targetHours;
 
-          data.forEach(item => {
+            weatherData.forEach(item => {
             const itemDate = new Date(item.date).toISOString().split('T')[0];
             if (itemDate === normalizedSelectedDate && 
                 item.location.toLowerCase() === parsedLocation.toLowerCase()) {
@@ -425,7 +496,7 @@ const AllRecommendedTasksPage = () => {
     };
 
     fetchWeatherAndGenerateRecommendations();
-  }, [fetchedTasks, location, selectedDate, useCurrentWeather, weatherData, getRecommendedTasks, selectedTime]);
+  }, [fetchedTasks, location, selectedDate, useCurrentWeather, weatherData, getRecommendedTasks, selectedTime, checkOnlineStatus, getOfflineWeather]);
 
   const handleTabChange = (event, newValue) => {
     setSelectedTabIndex(newValue);

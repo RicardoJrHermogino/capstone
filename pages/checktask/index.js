@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback  } from 'react';
 import CloseIcon from '@mui/icons-material/Close';
 import SignalWifiOffIcon from '@mui/icons-material/SignalWifiOff';
 import {
@@ -18,7 +18,7 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  Stack
+  Stack,
 } from '@mui/material';
 import dayjs from 'dayjs';
 import { LocalizationProvider } from '@mui/x-date-pickers';
@@ -40,6 +40,9 @@ const CustomPaper = (props) => (
 const locations = Object.keys(locationCoordinates);
 const apiKey = process.env.NEXT_PUBLIC_WEATHER_API_KEY;
 
+const OPENWEATHER_URL = "https://api.openweathermap.org/data/2.5/weather?lat=12.9742&lon=124.0058&appid=588741f0d03717db251890c0ec9fd071&units=metric";
+
+
 const CheckTaskFeasibilityPage = ({ open, handleClose }) => {
   const [tasks, setTasks] = useState([]);
   const [availableTasks, setAvailableTasks] = useState([]);
@@ -52,6 +55,7 @@ const CheckTaskFeasibilityPage = ({ open, handleClose }) => {
   const [resultMessage, setResultMessage] = useState('');
   const [isFeasible, setIsFeasible] = useState(false);
   const [resultOpen, setResultOpen] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
   const [lastForecastDate, setLastForecastDate] = useState(null);
   const [availableTimes, setAvailableTimes] = useState([]);
   const [lastForecastDateTime, setLastForecastDateTime] = useState(null);
@@ -63,106 +67,77 @@ const CheckTaskFeasibilityPage = ({ open, handleClose }) => {
     message: ''
   });
 
-  useEffect(() => {
-    // Fetch forecast data and extract available times for the last date
-    const fetchInitialForecastData = async () => {
+ // Check online status
+ const checkOnlineStatus = useCallback(async () => {
+  try {
+    const coordinates = locationCoordinates[Object.keys(locationCoordinates)[0]];
+    const url = `${OPENWEATHER_URL}?lat=${coordinates.lat}&lon=${coordinates.lon}&appid=${apiKey}&units=metric`;
+    await axios.get(url);
+    return true;
+  } catch (error) {
+    return false;
+  }
+}, []);
+
+ // Get tasks from Preferences
+ const getOfflineTasks = useCallback(async () => {
+  try {
+    const { value } = await Preferences.get({ key: 'coconut_tasks' });
+    return value ? JSON.parse(value) : [];
+  } catch (error) {
+    console.error('Error reading offline tasks:', error);
+    return [];
+  }
+}, []);
+
+// Get weather data from Preferences
+const getOfflineWeather = useCallback(async () => {
+  try {
+    const { value } = await Preferences.get({ key: 'forecast_data' });
+    return value ? JSON.parse(value) : [];
+  } catch (error) {
+    console.error('Error reading offline weather:', error);
+    return [];
+  }
+}, []);
+
+   // Fetch tasks for the form
+   useEffect(() => {
+    const fetchTasks = async () => {
+      setLoading(true);
       try {
-        const response = await axios.get(`${API_BASE_URL}/api/getWeatherData`);
-        const forecastData = response.data;
+        const isOnline = await checkOnlineStatus();
+        setIsOffline(!isOnline);
 
-        const lastDate = forecastData[forecastData.length - 1]?.date;
-        const timesForLastDate = forecastData
-          .filter((item) => item.date === lastDate)
-          .map((item) => dayjs(item.time, 'HH:mm:ss').format('HH:00'));
+        let fetchedTasks;
+        if (isOnline) {
+          console.log('📡 Device is online - fetching tasks from API...');
+          const response = await axios.get(`${API_BASE_URL}/api/coconut_tasks`);
+          fetchedTasks = response.data.coconut_tasks;
+        } else {
+          console.log('📱 Device is offline - retrieving tasks from storage...');
+          fetchedTasks = await getOfflineTasks();
+        }
 
-        setAvailableForecastTimes(timesForLastDate);
+        if (!Array.isArray(fetchedTasks)) {
+          throw new Error('Invalid tasks data format');
+        }
+        setTasks(fetchedTasks);
       } catch (error) {
-        console.error("Error fetching initial forecast data:", error);
+        console.error('Error fetching tasks:', error);
+        const cachedTasks = await getOfflineTasks();
+        if (Array.isArray(cachedTasks) && cachedTasks.length > 0) {
+          setTasks(cachedTasks);
+        } else {
+          setError('Unable to load tasks. Please check your connection.');
+        }
+      } finally {
+        setLoading(false);
       }
     };
 
-    fetchInitialForecastData();
-  }, []); 
-
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
-
-  // In the fetchAvailableTimes function, add:
-  const getLastAvailableDateTime = (forecastData) => {
-    const lastRecord = forecastData.reduce((latest, record) => {
-      const recordDateTime = dayjs(`${record.date} ${record.time}`);
-      return !latest || recordDateTime.isAfter(latest) ? recordDateTime : latest;
-    }, null);
-    return lastRecord;
-  };
-
-  const fetchAvailableTimes = async () => {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/api/getWeatherData`);
-      const forecastData = response.data;
-
-      const lastDateTime = getLastAvailableDateTime(forecastData);
-      setLastForecastDateTime(lastDateTime);
-
-      
-      
-      // Group data by date
-      const dateGroups = forecastData.reduce((acc, record) => {
-        const date = dayjs(record.date).format('YYYY-MM-DD');
-        if (!acc[date]) {
-          acc[date] = [];
-        }
-        // Format time consistently
-        const formattedTime = dayjs(record.time, 'HH:mm:ss').format('HH:mm');
-        if (!acc[date].includes(formattedTime)) {
-          acc[date].push(formattedTime);
-        }
-        return acc;
-      }, {});
-
-      // Find the last date in the forecast
-      const dates = Object.keys(dateGroups).sort();
-      const lastDate = dates[dates.length - 1];
-      
-      console.log('Last available date:', lastDate);
-      console.log('Available times for last date:', dateGroups[lastDate]);
-      
-      setLastForecastDate(lastDate);
-      setAvailableTimes(dateGroups[lastDate] || []);
-    } catch (error) {
-      console.error('Error fetching available times:', error);
-      toast.error('Failed to fetch available time slots');
-    }
-  };
-
-  useEffect(() => {
-    fetchAvailableTimes();
-  }, []);
-
-  
-
-
-
-   // Fetch tasks for the form
-   const fetchTasks = async () => {
-    if (!navigator.onLine) {
-      setLoading(false);
-      return;
-    }
-
-    try {
-      const response = await axios.get(`${API_BASE_URL}/api/coconut_tasks`);
-      setTasks(response.data.coconut_tasks || []);
-      setLoading(false);
-    } catch (error) {
-      toast.error("Failed to load tasks");
-      setLoading(false);
-      setError(error);
-    }
-  };
-
-  useEffect(() => {
     fetchTasks();
-  }, []);
+  }, [checkOnlineStatus, getOfflineTasks]);
 
   const dateOptions = Array.from({ length: 6 }, (_, index) => {
     const now = dayjs();
@@ -196,13 +171,6 @@ const CheckTaskFeasibilityPage = ({ open, handleClose }) => {
       };
     });
   };
-
-  // Add this useEffect to fetch available times when component mounts
-  useEffect(() => {
-    if (isOnline) {
-      fetchAvailableTimes();
-    }
-  }, [isOnline]);
 
  // Add this useEffect to reset time when date changes
  useEffect(() => {
@@ -245,60 +213,51 @@ const getTimeOptions = () => {
 };
 
 
-  const fetchWeatherData = async (selectedTime, selectedDate, selectedLocation) => {
-    try {
-      const isToday = selectedDate === dayjs().format('YYYY-MM-DD');
-      const isCurrentTime = selectedTime === 'Now';
-      
-      // Get coordinates for selected location
+const fetchWeatherData = async (selectedTime, selectedDate, selectedLocation) => {
+  try {
+    const isToday = selectedDate === dayjs().format('YYYY-MM-DD');
+    const isCurrentTime = selectedTime === 'Now';
+    const isOnline = await checkOnlineStatus();
+
+    if (isToday && isCurrentTime && isOnline) {
       const coordinates = locationCoordinates[selectedLocation];
-      if (!coordinates) {
-        console.error("Invalid location selected:", selectedLocation);
-        throw new Error("Invalid location selected");
-      }
-  
-      const url = !isToday || !isCurrentTime
-        ? `${API_BASE_URL}/api/getWeatherData?date=${selectedDate}&time=${selectedTime}&location=${selectedLocation}`
-        : `https://api.openweathermap.org/data/2.5/weather?lat=${coordinates.lat}&lon=${coordinates.lon}&appid=${apiKey}&units=metric`;
-    
-      const response = await axios.get(url);
-    
-      console.log("Weather Data Response:", response.data);  // Log the entire weather data response
-    
-      if (!Array.isArray(response.data)) {
-        return response.data;
-      }
-    
+      const response = await axios.get(`${OPENWEATHER_URL}?lat=${coordinates.lat}&lon=${coordinates.lon}&appid=${apiKey}&units=metric`);
+      return response.data;
+    }
+
+    let weatherData;
+    if (isOnline) {
+      console.log('📡 Device is online - fetching weather from API...');
+      const response = await axios.get(
+        `${API_BASE_URL}/api/getWeatherData?date=${selectedDate}&time=${selectedTime}&location=${selectedLocation}`
+      );
+      weatherData = response.data;
+    } else {
+      console.log('📱 Device is offline - retrieving weather from storage...');
+      weatherData = await getOfflineWeather();
+    }
+
+    if (Array.isArray(weatherData)) {
       const formattedTime = selectedTime === 'Now' 
         ? dayjs().format('HH:00:00')
         : dayjs(selectedTime, 'HH:mm').format('HH:00:00');
-    
-      const weatherRecord = response.data.find(record => {
+
+      const weatherRecord = weatherData.find(record => {
         const recordDate = dayjs(record.date).format('YYYY-MM-DD');
         const recordTime = dayjs(record.time, 'HH:mm:ss').format('HH:00:00');
-        
         return recordDate === selectedDate && recordTime === formattedTime && record.location === selectedLocation;
       });
-    
-      if (!weatherRecord) {
-        toast.error("No weather data available for the exact selected date and time.");
-        setResultMessage("Weather data is not available for the selected date and time. Please choose a different date or time.");
-        setIsFeasible(false);
-        setResultOpen(true);
-        return;
-      }
-
-      console.log("Selected Weather Record:", weatherRecord);  // Log the selected weather record
 
       return weatherRecord;
-    } catch (error) {
-      console.error("Error fetching weather data:", error);
-      toast.error("Failed to fetch weather data. Please try again later.");
-      setResultMessage("Failed to fetch weather data. Please try again later.");
-      setIsFeasible(false);
-      setResultOpen(true);
     }
-  };
+
+    return weatherData;
+  } catch (error) {
+    console.error("Error fetching weather data:", error);
+    throw error;
+  }
+};
+
 
   // Normalize the weather data
   const normalizeWeatherData = (data, isApiData) => {
@@ -440,7 +399,7 @@ const getTimeOptions = () => {
       <>
       <LocalizationProvider dateAdapter={AdapterDayjs}>
       <Dialog 
-        open={open && isOnline} 
+        open={open} 
         onClose={handleClose} 
         fullWidth 
         maxWidth="md" 

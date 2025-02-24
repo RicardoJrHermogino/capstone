@@ -5,6 +5,8 @@ import { Preferences } from '@capacitor/preferences';
 import TaskDetailsDialog from './TaskDetailsDialog'; // Using the separate dialog component
 import dayjs from 'dayjs';
 import API_BASE_URL from '@/config/apiConfig';
+import axios from 'axios';
+
 
 
 // New function to rank tasks similar to AllRecommendedTasksPage
@@ -222,14 +224,41 @@ const evaluateTask = (task, weather) => {
   }
 };
 
+const OPENWEATHER_URL = "https://httpbin.org/get";
+
+
 // Main RecommendedTask component
 const RecommendedTask = ({ weatherData, currentWeatherData, useCurrentWeather, location, selectedDate, selectedTime }) => {
   const [tasksData, setTasksData] = useState([]);
   const [recommendedTasks, setRecommendedTasks] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isOffline, setIsOffline] = useState(false);
   const [selectedTask, setSelectedTask] = useState(null);
   const router = useRouter();
 
+  const checkOnlineStatus = useCallback(async () => {
+    try {
+      await axios.get(OPENWEATHER_URL);
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }, []);
+
+  // Get tasks from Capacitor Preferences
+  const getOfflineTasks = useCallback(async () => {
+    try {
+      const { value } = await Preferences.get({ key: 'coconut_tasks' });
+      if (value) {
+        return JSON.parse(value);
+      }
+      return [];
+    } catch (error) {
+      console.error('Error reading offline tasks:', error);
+      return [];
+    }
+  }, []);
+  
   // Check if the selected time is 12 AM (00:00) or 9 PM (21:00)
   const isTimeRestricted = (selectedTime) => {
     const time = dayjs(selectedTime, 'HH:mm').hour();
@@ -295,34 +324,65 @@ const RecommendedTask = ({ weatherData, currentWeatherData, useCurrentWeather, l
   }, [location, selectedDate, selectedTime, useCurrentWeather]);
 
   // Fetch tasks data
-  useEffect(() => {
+   // Fetch tasks with offline support
+   useEffect(() => {
     if (isTimeRestricted(selectedTime)) {
       setIsLoading(false);
-      setRecommendedTasks([]);  // Clear any previous recommendations
+      setRecommendedTasks([]);
       return;
     }
 
     const fetchTasks = async () => {
       setIsLoading(true);
       try {
-        const response = await fetch(`${API_BASE_URL}/api/coconut_tasks`);
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
+        const isOnline = await checkOnlineStatus();
+        setIsOffline(!isOnline);
+
+        let tasks;
+        if (isOnline) {
+          console.log('📡 Device is online - fetching from API...');
+          // Online: fetch from API and cache
+          const response = await fetch(`${API_BASE_URL}/api/coconut_tasks`);
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+          const data = await response.json();
+          tasks = data.coconut_tasks;
+          console.log(`✅ Successfully fetched ${tasks.length} tasks from API`);
+
+          
+          // Cache the fresh data
+        } else {
+          // Offline: get from preferences
+          console.log('📱 Device is offline - retrieving from local storage...');
+
+          tasks = await getOfflineTasks();
         }
-        const data = await response.json();
-        if (!data.coconut_tasks || !Array.isArray(data.coconut_tasks)) {
+
+        if (!Array.isArray(tasks)) {
           throw new Error('Invalid tasks data format');
         }
-        setTasksData(data.coconut_tasks);
+
+        setTasksData(tasks);
       } catch (error) {
         console.error('Error fetching tasks:', error);
+        
+        // Final fallback: try to get cached data even if online fetch failed
+        try {
+          const cachedTasks = await getOfflineTasks();
+          if (Array.isArray(cachedTasks) && cachedTasks.length > 0) {
+            setTasksData(cachedTasks);
+          }
+        } catch (fallbackError) {
+          console.error('Error fetching cached tasks:', fallbackError);
+        }
       } finally {
         setIsLoading(false);
       }
     };
 
     fetchTasks();
-  }, [selectedTime]); // Depend on selectedTime to trigger this useEffect
+  }, [selectedTime, checkOnlineStatus, getOfflineTasks]);
 
   // Process weather data and update recommendations
   const processedWeather = useMemo(() => {

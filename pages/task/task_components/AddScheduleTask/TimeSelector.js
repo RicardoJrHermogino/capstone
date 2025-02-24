@@ -1,10 +1,12 @@
-// TimePicker.js
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Select, MenuItem, Grid, InputLabel, FormControl, OutlinedInput, InputAdornment } from '@mui/material';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import dayjs from 'dayjs';
 import axios from 'axios';
+import { Preferences } from '@capacitor/preferences';
 import API_BASE_URL from '@/config/apiConfig';
+
+const OPENWEATHER_URL = "https://httpbin.org/get";
 
 const TimeSelector = ({
   selectedTime,
@@ -15,54 +17,83 @@ const TimeSelector = ({
 }) => {
   const [availableTimes, setAvailableTimes] = useState([]);
   const [lastAvailableDate, setLastAvailableDate] = useState(null);
+  const [error, setError] = useState(null);
 
-
-  
   const timeIntervals = useMemo(() => [
-    '00:00', '03:00', '06:00', '09:00', 
-    '12:00', '15:00', '18:00', '21:00'
-  ], []); // Move timeIntervals inside useMemo
+    '03:00', '06:00', '09:00', 
+    '12:00', '15:00', '18:00',
+  ], []);
 
   const currentDateTime = dayjs();
   const currentDate = currentDateTime.format('YYYY-MM-DD');
 
-  // Fetch weather data and determine available times
-  useEffect(() => {
-    const fetchAvailableTimeIntervals = async () => {
-      try {
-        const response = await axios.get(`${API_BASE_URL}/api/getWeatherData`);
-        const forecastData = response.data;
-
-        const lastDate = forecastData[forecastData.length - 1]?.date;
-        setLastAvailableDate(lastDate);
-
-        const timesForLastDate = forecastData
-          .filter((item) => item.date === lastDate)
+  // Function to get offline data from Capacitor Preferences
+  const getOfflineData = async () => {
+    try {
+      const { value } = await Preferences.get({ key: 'forecast_data' });
+      if (value) {
+        const forecastData = JSON.parse(value);
+        const timesForDate = forecastData
+          .filter((item) => item.date === selectedDate)
           .map((item) => dayjs(item.time, 'HH:mm:ss').format('HH:00'));
 
-        setAvailableTimes(timesForLastDate);
-      } catch (error) {
-        console.error('Error fetching available time intervals:', error);
+        console.log("Using offline time data:", timesForDate);
+        return timesForDate;
       }
-    };
+    } catch (error) {
+      console.error("Error reading offline time data:", error);
+    }
+    return [];
+  };
 
-    fetchAvailableTimeIntervals();
-  }, []);
+  // Function to fetch available time intervals
+  const fetchAvailableTimeIntervals = useCallback(async () => {
+    try {
+      // Check if online by fetching from OpenWeather API
+      await axios.get(OPENWEATHER_URL);
 
-// Memoize available time intervals
-const availableTimeIntervals = useMemo(() => {
-  return timeIntervals.map((time) => {
-    const fullTime = dayjs(`${selectedDate} ${time}`, 'YYYY-MM-DD HH:mm');
-    const isPastTime = selectedDate === currentDate && fullTime.isBefore(currentDateTime);
-    const isUnavailableForLastDate =
-      selectedDate === lastAvailableDate && !availableTimes.includes(time);
+      // If success, fetch actual weather data
+      const response = await axios.get(`${API_BASE_URL}/api/getWeatherData`);
+      const forecastData = response.data;
 
-    return {
-      time,
-      isDisabled: isPastTime || isUnavailableForLastDate,
-    };
-  });
-}, [timeIntervals, selectedDate, currentDate, currentDateTime, lastAvailableDate, availableTimes]);
+      const lastDate = forecastData[forecastData.length - 1]?.date;
+      setLastAvailableDate(lastDate);
+
+      const timesForLastDate = forecastData
+        .filter((item) => item.date === selectedDate)
+        .map((item) => dayjs(item.time, 'HH:mm:ss').format('HH:00'));
+
+      console.log("Available times (API):", timesForLastDate);
+      setAvailableTimes(timesForLastDate);
+      setError(null);
+    } catch (error) {
+      console.log("Network error, falling back to offline time data");
+
+      // Use offline data immediately if offline
+      const offlineTimes = await getOfflineData();
+      setAvailableTimes(offlineTimes);
+
+      if (offlineTimes.length === 0) {
+        setError("No time data available - please check your connection");
+      } else {
+        setError("Operating in offline mode");
+      }
+    }
+  }, [selectedDate]);
+
+  // Memoize available time intervals
+  const availableTimeIntervals = useMemo(() => {
+    return timeIntervals.map((time) => {
+      const fullTime = dayjs(`${selectedDate} ${time}`, 'YYYY-MM-DD HH:mm');
+      const isPastTime = selectedDate === currentDate && fullTime.isBefore(currentDateTime);
+      const isUnavailable = !availableTimes.includes(time);
+
+      return {
+        time,
+        isDisabled: isPastTime || isUnavailable,
+      };
+    });
+  }, [timeIntervals, selectedDate, currentDate, currentDateTime, availableTimes]);
 
   // Reset the selected time if it becomes invalid
   useEffect(() => {
@@ -88,6 +119,11 @@ const availableTimeIntervals = useMemo(() => {
   );
 
   const convertToAMPM = (time) => dayjs(time, 'HH:mm').format('hh:mm A');
+
+  // Load available times when selectedDate changes
+  useEffect(() => {
+    fetchAvailableTimeIntervals();
+  }, [fetchAvailableTimeIntervals, selectedDate]);
 
   return (
     <Grid item xs={12} sm={12} align="center">
@@ -143,6 +179,7 @@ const availableTimeIntervals = useMemo(() => {
           ))}
         </Select>
       </FormControl>
+      {/* {error && <div style={{ color: "orange", marginTop: "8px" }}>{error}</div>} */}
     </Grid>
   );
 };

@@ -3,10 +3,10 @@ import { FormControl, InputLabel, Select, MenuItem, Grid, OutlinedInput, InputAd
 import CalendarTodayIcon from "@mui/icons-material/CalendarToday";
 import dayjs from "dayjs";
 import axios from "axios";
-import { getDatabaseConnection } from "@/utils/sqliteService";  // Import the getDatabaseConnection function
+import { Preferences } from '@capacitor/preferences';
 import API_BASE_URL from "@/config/apiConfig";
 
-const FETCH_INTERVAL = 5 * 60 * 1000; // 5 minutes
+const OPENWEATHER_URL = "https://httpbin.org/get";
 
 const DatePicker = ({ selectedDate, setSelectedDate, MenuProps }) => {
   const [availableDates, setAvailableDates] = useState([]);
@@ -14,19 +14,34 @@ const DatePicker = ({ selectedDate, setSelectedDate, MenuProps }) => {
   const [error, setError] = useState(null);
   const currentDate = dayjs().format("YYYY-MM-DD");
 
-  // Function to fetch available dates from API
-  const fetchAvailableDatesApi = useCallback(async () => {
-    setLoading(true);
+  // Function to get offline data from Capacitor Preferences
+  const getOfflineData = async () => {
     try {
-      const lastFetchTime = localStorage.getItem("last_fetch_time");
-      const now = Date.now();
+      const { value } = await Preferences.get({ key: "forecast_data" });
+      if (value) {
+        const forecastData = JSON.parse(value);
+        const uniqueDates = [...new Set(forecastData.map((item) => dayjs(item.date).format("YYYY-MM-DD")))]
+          .filter((date) => !dayjs(date).isBefore(currentDate, "day"))
+          .sort();
 
-      // Only fetch if more than 5 minutes have passed since last fetch
-      if (lastFetchTime && now - parseInt(lastFetchTime) < FETCH_INTERVAL) {
-        setLoading(false);
-        return;
+        console.log("Using offline data:", uniqueDates);
+        return uniqueDates;
       }
+    } catch (error) {
+      console.error("Error reading offline data:", error);
+    }
+    return [];
+  };
 
+  // Fetch Weather Data
+  const fetchAvailableDates = useCallback(async () => {
+    setLoading(true);
+
+    try {
+      // Check if online by fetching from OpenWeather API
+      await axios.get(OPENWEATHER_URL);
+
+      // If success, fetch actual weather data
       const response = await axios.get(`${API_BASE_URL}/api/getWeatherData`);
       const forecastData = response.data;
 
@@ -35,66 +50,34 @@ const DatePicker = ({ selectedDate, setSelectedDate, MenuProps }) => {
         .sort();
 
       console.log("Available dates (API):", uniqueDates);
-
-      if (JSON.stringify(uniqueDates) !== JSON.stringify(availableDates)) {
-        setAvailableDates(uniqueDates);
-        localStorage.setItem("forecast_dates", JSON.stringify(uniqueDates));
-        localStorage.setItem("last_fetch_time", now.toString()); // Update fetch timestamp
-
-        if (!uniqueDates.includes(selectedDate)) {
-          setSelectedDate(uniqueDates[0] || "");
-        }
+      setAvailableDates(uniqueDates);
+      if (!uniqueDates.includes(selectedDate)) {
+        setSelectedDate(uniqueDates[0] || "");
       }
     } catch (error) {
-      console.error("API fetch failed, switching to offline mode:", error);
-      fetchAvailableDatesOffline();
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedDate, setSelectedDate, availableDates]);
+      console.log("Network error, falling back to offline data");
 
-  // Function to fetch available dates from SQLite
-  const fetchAvailableDatesOffline = useCallback(async () => {
-    setLoading(true);
-    try {
-      const db = await getDatabaseConnection();  // Use the shared database connection
-
-      const result = await db.query("SELECT DISTINCT date FROM forecast_data WHERE date >= ?", [currentDate]);
-
-      if (result.values?.length > 0) {
-        const dates = result.values.map((row) => row.date);
-        console.log("Available dates (Offline):", dates);
-        setAvailableDates(dates);
-
-        if (!selectedDate || !dates.includes(selectedDate)) {
-          setSelectedDate(dates[0] || "");
-        }
-      } else {
-        setError("No forecast data found in SQLite");
+      // Use offline data immediately if offline
+      const offlineDates = await getOfflineData();
+      setAvailableDates(offlineDates);
+      if (!offlineDates.includes(selectedDate)) {
+        setSelectedDate(offlineDates[0] || "");
       }
-    } catch (error) {
-      console.error("Error fetching data from SQLite:", error);
-      setError("Error fetching available dates");
+
+      if (offlineDates.length === 0) {
+        setError("No data available - please check your connection");
+      }
     } finally {
       setLoading(false);
     }
   }, [selectedDate, setSelectedDate]);
 
-  // Load offline data first and then fetch API in background
   useEffect(() => {
-    fetchAvailableDatesOffline();
-    fetchAvailableDatesApi();
-
-    // Poll API every 5 minutes to keep data fresh
-    const interval = setInterval(() => {
-      fetchAvailableDatesApi();
-    }, FETCH_INTERVAL);
-
-    return () => clearInterval(interval);
-  }, [fetchAvailableDatesApi, fetchAvailableDatesOffline]);
+    fetchAvailableDates();
+  }, [fetchAvailableDates]);
 
   if (loading) return <div>Loading...</div>;
-  if (error) return <div style={{ color: "red" }}>Error: {error}</div>;
+  if (error) return <div style={{ color: "red" }}>{error}</div>;
 
   return (
     <Grid item xs={12} sm={12} align="center">

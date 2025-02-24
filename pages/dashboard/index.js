@@ -23,10 +23,10 @@ import { useLocation } from '@/utils/LocationContext'; // Import the custom hook
 import SkeletonLoader from './dashboardcomp/SkeletonLoader';
 import API_BASE_URL from '@/config/apiConfig';
 
-import { initDatabase } from '@/utils/offlineDatabase';
+import { initStorage } from '@/utils/offlineData';
 import { Preferences } from '@capacitor/preferences'; // Add this import
-import { SQLiteConnection, CapacitorSQLite } from '@capacitor-community/sqlite';
-
+// import { getDatabaseConnection } from '@/utils/sqliteService';  // Import the getDatabaseConnection function
+import { Capacitor } from '@capacitor/core';
 
 
 
@@ -46,9 +46,6 @@ const Dashboard = () => {
   const [submittedDate, setSubmittedDate] = useState("");
   const [submittedTime, setSubmittedTime] = useState("");
 
-  const [isOfflineMode, setIsOfflineMode] = useState(false);
-
-
   const [currentWeatherData, setCurrentWeatherData] = useState(null);
   const [isCurrentWeather, setIsCurrentWeather] = useState(true); 
   const [drawerOpen, setDrawerOpen] = useState(false); 
@@ -59,95 +56,39 @@ const Dashboard = () => {
   const [hasInteractedWithTime, setHasInteractedWithTime] = useState(false);
   const [lastToastTime, setLastToastTime] = useState(0);
   const TOAST_COOLDOWN = 5000; // 2 seconds cooldown between toasts
-  const [isOnline, setIsOnline] = useState(true);
   const router = useRouter();
 
-   // New function to fetch offline weather data
-   const fetchOfflineWeatherData = async (selectedLocation, selectedDateTime) => {
-    const { value: isDataDownloaded } = await Preferences.get({ key: 'offlineDataDownloaded' });
-    
-    if (!isDataDownloaded) {
-      showErrorToast('Please download offline data first');
-      return null;
-    }
-
-    if (Capacitor.getPlatform() !== 'web') {
-      const sqliteConnection = new SQLiteConnection(CapacitorSQLite);
-
-      try {
-        // Close and delete any existing connections
-        try {
-          await sqliteConnection.closeConnection('offline_db');
-          await sqliteConnection.deleteConnection('offline_db');
-        } catch (error) {
-          console.warn('Error cleaning up connections:', error);
-        }
-
-        // Create and open new connection
-        const db = await sqliteConnection.createConnection(
-          'offline_db',
-          false,
-          'no-encryption',
-          1,
-          false
-        );
-        await db.open();
-
-        // Format the date and time for query
-        const formattedDate = selectedDateTime.format('YYYY-MM-DD');
-        const formattedTime = selectedDateTime.format('HH:mm:ss');
-
-        // Query the offline database
-        const query = `
-          SELECT * FROM forecast_data 
-          WHERE location = ? 
-          AND date = ? 
-          AND time = ?
-        `;
-        const result = await db.query(query, [selectedLocation, formattedDate, formattedTime]);
-
-        await sqliteConnection.closeConnection('offline_db');
-
-        if (result.values?.length > 0) {
-          return result.values[0];
-        }
-        return null;
-      } catch (error) {
-        console.error('Error fetching offline data:', error);
-        showErrorToast(`Error accessing offline data: ${error.message}`);
-        return null;
-      }
-    } else {
-      showErrorToast('Offline mode not supported in web browser');
-      return null;
-    }
-  };
+  const [isOnline, setIsOnline] = useState(true);
 
 
+  // Add initial network check
   useEffect(() => {
-    const handleOnlineStatus = () => {
-      setIsOnline(navigator.onLine);
+    const checkConnection = async () => {
+      console.log('Checking connection...');
+      try {
+        const response = await axios.get('https://httpbin.org/get');
+        console.log('Response received:', response.status);
+        setIsOnline(true);
+      } catch (error) {
+        console.log('Network error, device is offline');
+        setIsOnline(false);
+      }
     };
   
-    // Check initial status on load
-    handleOnlineStatus();
+    const intervalId = setInterval(checkConnection, 1000);
   
-    // Listen to online/offline events
-    window.addEventListener('online', handleOnlineStatus);
-    window.addEventListener('offline', handleOnlineStatus);
-  
-    return () => {
-      window.removeEventListener('online', handleOnlineStatus);
-      window.removeEventListener('offline', handleOnlineStatus);
-    };
+    return () => clearInterval(intervalId);
   }, []);
+   // Empty dependency array ensures this effect runs only once at component mount
+
+ 
 
   const handleDownloadData = async () => {
     try {
       // Add a new state for download loading
       setLoading(true);
       console.log('Starting download process');
-      const db = await initDatabase();
+      const db = await initStorage();
       
       if (db) {
         console.log('Database initialized successfully');
@@ -236,10 +177,7 @@ const Dashboard = () => {
 
   // Fetch current weather data based on the user's location
   const fetchCurrentWeatherData = async (lat, lon) => {
-    // if (!navigator.onLine) {
-    //   router.push('/offline');
-    //   return;
-    // }
+
     setLoading(true);
     setIsCurrentWeather(true); // Set to current weather
     setSelectedTime(dayjs().format('HH:mm')); // Add current time when fetching current weather
@@ -255,113 +193,109 @@ const Dashboard = () => {
       setTemperature(Math.round(currentWeather.main.temp));
       showSuccessToast("Current Weather Displayed.");
     } catch (error) {
-      // Check if the error is due to network issues
-      if (!navigator.onLine || error.message.includes('Network Error')) {
-        // router.push('/offline');
-      } else {
-        showErrorToast("Failed to fetch current weather data.");
-      }
+        showErrorToast("Failed to fetch current weather data. Please check your internet connection.");
     } finally {
       setLoading(false);
     }
   };
 
-  // Fetch weather data for the selected date, time, and location
-  const fetchWeatherData = async (lat, lon) => {
-    setLoading(true);
-    setIsCurrentWeather(false);
 
+
+// Fetch weather data for the selected date, time, and location
+const fetchWeatherData = async (lat, lon) => {
+  setLoading(true);
+  setIsCurrentWeather(false);
+
+  try {
+    // First try to fetch online data
+    const response = await axios.get(
+      'https://httpbin.org/get'
+    );
+
+    // If online, proceed with normal API fetch
+    const apiResponse = await axios.get(`${API_BASE_URL}/api/getWeatherData`);
+    const forecastData = apiResponse.data;
+
+    const lastDate = forecastData[forecastData.length - 1].date;
+    const timesForLastDate = forecastData
+      .filter(item => item.date === lastDate)
+      .map(item => item.time);
+
+    setAvailableForecastTimes(timesForLastDate);
+    processWeatherData(forecastData);
+
+  } catch (error) {
+    console.log('Network error, falling back to offline data');
     try {
-      // Try online API first
-      const response = await axios.get(`${API_BASE_URL}/api/getWeatherData`);
-      const forecastData = response.data;
-      
-
-      const lastDate = forecastData[forecastData.length - 1].date;
-      const timesForLastDate = forecastData 
-        .filter(item => item.date === lastDate)
-        .map(item => item.time);
-
-        setAvailableForecastTimes(timesForLastDate);
-  
-      console.log('All Forecast Data:', forecastData);
-      console.log('Selected Location:', location);
-      console.log('Selected Date:', selectedDate);
-      console.log('Selected Time:', selectedTime);
-  
-      const selectedDateTime = dayjs(`${selectedDate} ${selectedTime}`);
-      console.log('Selected DateTime:', selectedDateTime.format());
-  
-      const matchedForecast = forecastData.find(item => {
-        const itemDateTime = dayjs(`${item.date} ${item.time}`);
-        console.log('Item:', item);
-        console.log('Item DateTime:', itemDateTime.format());
-        console.log('Location Match:', item.location === location);
-        console.log('DateTime Match:', itemDateTime.isSame(selectedDateTime, 'hour'));
+      // Get offline data from Preferences
+      const { value } = await Preferences.get({ key: 'forecast_data' });
+      if (value) {
+        const offlineForecastData = JSON.parse(value);
         
-        return itemDateTime.isSame(selectedDateTime, 'hour') && item.location === location;
-      });
-  
-      console.log('Matched Forecast:', matchedForecast);
-  
-      if (matchedForecast) {
-        try {
-          const detailResponse = await axios.get(`${API_BASE_URL}/api/getWeatherData?weather_data_id=${matchedForecast.weather_data_id}`);
-          const detailedData = detailResponse.data;
+        const lastOfflineDate = offlineForecastData[offlineForecastData.length - 1].date;
+        const offlineTimesForLastDate = offlineForecastData
+          .filter(item => item.date === lastOfflineDate)
+          .map(item => item.time);
 
-          // Process pop and rain_3h
-          const pop = matchedForecast.pop !== undefined 
-            ? parseFloat(matchedForecast.pop)
-            : null;
-          const rain3h = matchedForecast.rain_3h !== undefined 
-            ? parseFloat(matchedForecast.rain_3h) 
-            : 0;
-  
-          console.log('Detailed Weather Data:', detailedData);
-  
-          setWeatherId(detailedData.weather_id);
-          setWeatherData({
-            ...detailedData,
-            pop,
-            rain3h
-          });
-          setTemperature(Math.round(detailedData.temperature));
-          showSuccessToast("Forecasted Weather Displayed.");
-        } catch (detailError) {
-          console.error('Error fetching detailed weather data:', detailError.response?.data || detailError.message);
-          showErrorToast(`Failed to fetch detailed weather data: ${detailError.response?.data?.message || detailError.message}`);
-        }
+        setAvailableForecastTimes(offlineTimesForLastDate);
+        processWeatherData(offlineForecastData);
+        
+        // Show offline mode toast
+        showSuccessToast("Using offline weather data");
       } else {
-        showErrorToast("No weather data available for the selected time and location.");
+        showErrorToast("No offline data available. Please download data when online.");
       }
-    }  catch (error) {
-      console.log('API call failed, switching to offline mode');
-      setIsOfflineMode(true);
-
-      // Try fetching offline data
-      const offlineData = await fetchOfflineWeatherData(location, dayjs(`${selectedDate} ${selectedTime}`));
-      
-      if (offlineData) {
-        setWeatherId(offlineData.weather_id);
-        setWeatherData({
-          temperature: offlineData.temperature,
-          pressure: offlineData.pressure,
-          humidity: offlineData.humidity,
-          clouds: offlineData.clouds,
-          wind_speed: offlineData.wind_speed,
-          wind_gust: offlineData.wind_gust,
-          pop: offlineData.pop,
-          rain3h: offlineData.rain_3h
-        });
-        setTemperature(Math.round(offlineData.temperature));
-        showSuccessToast("Showing offline weather data");
-      } else {
-        showErrorToast("No offline data available for selected time and location");
-      }
-    } finally {
-      setLoading(false);
+    } catch (offlineError) {
+      console.error('Error accessing offline data:', offlineError);
+      showErrorToast("Failed to access offline weather data");
     }
-  };
+  } finally {
+    setLoading(false);
+  }
+};
+
+
+// Helper function to process weather data (shared between online and offline modes)
+const processWeatherData = (forecastData) => {
+  console.log('Processing Forecast Data:', forecastData);
+  console.log('Selected Location:', location);
+  console.log('Selected Date:', selectedDate);
+  console.log('Selected Time:', selectedTime);
+
+  const selectedDateTime = dayjs(`${selectedDate} ${selectedTime}`);
+  console.log('Selected DateTime:', selectedDateTime.format());
+
+  const matchedForecast = forecastData.find(item => {
+    const itemDateTime = dayjs(`${item.date} ${item.time}`);
+    return itemDateTime.isSame(selectedDateTime, 'hour') && item.location === location;
+  });
+
+  console.log('Matched Forecast:', matchedForecast);
+
+  if (matchedForecast) {
+    // Process pop and rain_3h
+    const pop = matchedForecast.pop !== undefined
+      ? parseFloat(matchedForecast.pop)
+      : null;
+    const rain3h = matchedForecast.rain_3h !== undefined
+      ? parseFloat(matchedForecast.rain_3h)
+      : 0;
+
+    setWeatherId(matchedForecast.weather_id);
+    setWeatherData({
+      ...matchedForecast,
+      pop,
+      rain3h,
+      temperature: matchedForecast.temperature,
+      weather_id: matchedForecast.weather_id
+    });
+    setTemperature(Math.round(matchedForecast.temperature));
+    showSuccessToast("Weather forecast displayed");
+  } else {
+    showErrorToast("No weather data available for the selected time and location");
+  }
+};
+
 
   useEffect(() => {
     const currentGreeting = greeting(new Date());
@@ -436,27 +370,27 @@ const Dashboard = () => {
   }, []);
 
 
-  useEffect(() => {
-    // Fetch forecast data and extract available times for the last date
-    const fetchInitialForecastData = async () => {
-      try {
-        const response = await axios.get(`${API_BASE_URL}/api/getWeatherData`);
-        const forecastData = response.data;
+  // useEffect(() => {
+  //   // Fetch forecast data and extract available times for the last date
+  //   const fetchInitialForecastData = async () => {
+  //     try {
+  //       const response = await axios.get(`${API_BASE_URL}/api/getWeatherData`);
+  //       const forecastData = response.data;
 
-        const lastDate = forecastData[forecastData.length - 1]?.date;
-        const timesForLastDate = forecastData
-          .filter((item) => item.date === lastDate)
-          .map((item) => dayjs(item.time, 'HH:mm:ss').format('HH:00'));
+  //       const lastDate = forecastData[forecastData.length - 1]?.date;
+  //       const timesForLastDate = forecastData
+  //         .filter((item) => item.date === lastDate)
+  //         .map((item) => dayjs(item.time, 'HH:mm:ss').format('HH:00'));
 
-        setAvailableForecastTimes(timesForLastDate);
-      } catch (error) {
-        console.error("Error fetching initial forecast data:", error);
-        showErrorToast("Failed to fetch initial forecast data.");
-      }
-    };
+  //       setAvailableForecastTimes(timesForLastDate);
+  //     } catch (error) {
+  //       console.error("Error fetching initial forecast data:", error);
+  //       showErrorToast("Failed to fetch initial forecast data.");
+  //     }
+  //   };
 
-    fetchInitialForecastData();
-  }, [showErrorToast]); // Add showErrorToast as dependency
+  //   fetchInitialForecastData();
+  // }, [showErrorToast]); // Add showErrorToast as dependency
   
   
   const handleTestOfflineClick = () => {
@@ -482,7 +416,7 @@ const Dashboard = () => {
            
           </div>
         </Grid>
-        <Grid item xs={4} sm={6} sx={{ textAlign: 'right' }}>
+         <Grid item xs={4} sm={6} sx={{ textAlign: 'right' }}>
           <IconButton 
             sx={{ border: '1px solid lightgray', borderRadius: '20px', width: '56px', height: '56px', backgroundColor: 'white' }}
             onClick={ handleDownloadData}
@@ -493,9 +427,9 @@ const Dashboard = () => {
           </IconButton>
         </Grid>
 
-        <button onClick={handleTestOfflineClick}>
-      Go to Test Offline Data
-    </button>
+          <button onClick={handleTestOfflineClick}>
+        Go to Test Offline Data
+      </button> 
 
 
         {/* Button to Open Drawer */}
@@ -533,22 +467,6 @@ const Dashboard = () => {
           <Typography letterSpacing={4}></Typography>
         </Grid>
 
-        {isOfflineMode && (
-        <Typography 
-          variant="body2" 
-          sx={{ 
-            backgroundColor: '#fff3cd', 
-            color: '#856404', 
-            padding: '8px', 
-            borderRadius: '4px',
-            marginTop: '8px'
-          }}
-        >
-          Currently in offline mode. Showing locally stored weather data.
-        </Typography>
-      )}
-
-        {/* Weather Display Component */}
         
         {/* Weather Display and Recommended Task Components */}
           {loading ? (
@@ -630,30 +548,30 @@ const Dashboard = () => {
           </Grid>
           <Grid item xs={12}>
           <Button 
-            variant="contained" 
-            onClick={handleFetchCurrentWeather} 
-            sx={{ 
-              backgroundColor: '#48ccb4', 
-              borderRadius: '24px',
-              width: '100%', 
-              height: '55px', 
-              color: '#ffffff',
-              textTransform: 'none',
-              fontWeight: 'bold',
-              boxShadow: '0px 3px 5px rgba(0, 0, 0, 0.2)',
-              '&:hover': {
-                backgroundColor: '#40b8a5',
-              },
-            }}
-            disabled={!isOnline}  // Disable button if offline
-          >
-            Check Current Weather
-          </Button>
-          {!isOnline && (
-            <Typography variant="body2" color="textSecondary" sx={{ marginTop: '8px', textAlign: 'center' }}>
-              Offline mode doesn't support real-time weather forecasting.
-            </Typography>
-          )}
+              variant="contained" 
+              onClick={handleFetchCurrentWeather}
+              disabled={!isOnline}
+              sx={{ 
+                backgroundColor: !isOnline ? '#cccccc' : '#48ccb4', 
+                borderRadius: '24px',
+                width: '100%', 
+                height: '55px', 
+                color: '#ffffff',
+                textTransform: 'none',
+                fontWeight: 'bold',
+                boxShadow: '0px 3px 5px rgba(0, 0, 0, 0.2)',
+                '&:hover': {
+                  backgroundColor: !isOnline ? '#cccccc' : '#40b8a5',
+                },
+                '&.Mui-disabled': {
+                  backgroundColor: '#cccccc',
+                  color: '#666666',
+                }
+              }}
+            >
+              {isOnline ? 'Check Current Weather' : 'Current Weather Unavailable Offline'}
+            </Button>
+
           </Grid>
         </Grid>
 

@@ -30,32 +30,46 @@ const EditTaskDialog = ({
   const [hasInteractedWithTime, setHasInteractedWithTime] = useState(false);   
 
   useEffect(() => {
-    if (task) {
-      setSelectedDate(task.date || null);
-      setSelectedTime(task.time || null);
+    if (task && task.date && task.time) {
+      setSelectedDate(task.date);
+      setSelectedTime(task.time);
     }
-  }, [task]);
+  }, [task]); 
+  
 
-  useEffect(() => {
-    const fetchInitialForecastData = async () => {
-      try {
-        const response = await axios.get(`${API_BASE_URL}/api/getWeatherData`);
-        const forecastData = response.data;
+// Update the task state when date or time changes - fixed version
+useEffect(() => {
+  if (task && (selectedDate !== task.date || selectedTime !== task.time)) {
+    // Only update if the values are actually different and not null/undefined
+    if (selectedDate !== null && selectedTime !== null) {
+      setTask(prevTask => ({
+        ...prevTask,
+        date: selectedDate,
+        time: selectedTime
+      }));
+    }
+  }
+}, [selectedDate, selectedTime]);  // Remove task and setTask from dependencies
 
-        const lastDate = forecastData[forecastData.length - 1]?.date;
-        const timesForLastDate = forecastData
-          .filter((item) => item.date === lastDate)
-          .map((item) => dayjs(item.time, 'HH:mm:ss').format('HH:00'));
+  // useEffect(() => {
+  //   const fetchInitialForecastData = async () => {
+  //     try {
+  //       const response = await axios.get(`${API_BASE_URL}/api/getWeatherData`);
+  //       const forecastData = response.data;
 
-        setAvailableForecastTimes(timesForLastDate);
-      } catch (error) {
-        console.error("Error fetching initial forecast data:", error);
-        showErrorToast("Failed to fetch initial forecast data.");
-      }
-    };
+  //       const lastDate = forecastData[forecastData.length - 1]?.date;
+  //       const timesForLastDate = forecastData
+  //         .filter((item) => item.date === lastDate)
+  //         .map((item) => dayjs(item.time, 'HH:mm:ss').format('HH:00'));
 
-    fetchInitialForecastData();
-  }, []); 
+  //       setAvailableForecastTimes(timesForLastDate);
+  //     } catch (error) {
+  //       console.error("Error fetching initial forecast data:", error);
+  //     }
+  //   };
+
+  //   fetchInitialForecastData();
+  // }, []); 
 
   const dateOptions = Array.from({ length: 6 }, (_, index) => {
     const date = dayjs().add(index, 'day');
@@ -68,6 +82,18 @@ const EditTaskDialog = ({
       </MenuItem>
     );
   });
+
+  // Handle update with proper validation
+  const handleUpdate = () => {
+    if (!selectedDate || !selectedTime || !task.location || !task.task_name) {
+      // Show error or validation message
+      console.error('Missing required fields');
+      return;
+    }
+    
+    // Call the parent's onUpdate function
+    onUpdate();
+  };
 
   return (
     <LocalizationProvider dateAdapter={AdapterDayjs}>
@@ -197,7 +223,7 @@ const EditTaskDialog = ({
             <Button
               fullWidth
               variant="contained"
-              onClick={onUpdate}
+              onClick={handleUpdate}
               sx={{
                 backgroundColor: '#48ccb4',
                 color: 'white',

@@ -21,8 +21,11 @@ import DateSelector from './DateSelector';
 import TimeSelector from './TimeSelector';
 import { toast } from 'react-hot-toast';
 
-
-
+const OPENWEATHER_URL = "https://httpbin.org/get";
+const STORAGE_KEYS = {
+  SCHEDULED_TASKS: 'scheduled_tasks',
+  PENDING_TASKS: 'pending_tasks',
+};
 
 const AddScheduledTask = () => {
   const [userId, setUserId] = useState(null);
@@ -33,14 +36,104 @@ const AddScheduledTask = () => {
   const [selectedDate, setSelectedDate] = useState(null);
   const [selectedTime, setSelectedTime] = useState(null);
   const [hasInteractedWithTime, setHasInteractedWithTime] = useState(false);
-  const [lastAvailableTimes, setLastAvailableTimes] = useState([]);
   const [availableForecastTimes, setAvailableForecastTimes] = useState([]);
+  const [isOffline, setIsOffline] = useState(false);
   const router = useRouter();
 
 
-// Handle device registration and activity update
-const handleDeviceRegistration = async (deviceId) => {
+// Check online status
+const checkOnlineStatus = async () => {
   try {
+    await axios.get(OPENWEATHER_URL);
+    setIsOffline(false);
+    return true;
+  } catch (error) {
+    setIsOffline(true);
+    return false;
+  }
+};
+
+// Get tasks from Preferences
+const getOfflineTasks = async () => {
+  try {
+    const { value } = await Preferences.get({ key: 'coconut_tasks' });
+    return value ? JSON.parse(value) : [];
+  } catch (error) {
+    console.error('Error reading offline tasks:', error);
+    return [];
+  }
+};
+
+  // Get weather data from Preferences
+  const getOfflineWeather = async () => {
+    try {
+      const { value } = await Preferences.get({ key: 'forecast_data' });
+      return value ? JSON.parse(value) : [];
+    } catch (error) {
+      console.error('Error reading offline weather:', error);
+      return [];
+    }
+  };
+
+
+
+  // Check for duplicate tasks
+  const checkDuplicateTask = async (taskId, date, time, location) => {
+    try {
+      // Check scheduled tasks
+      const { value: scheduledValue } = await Preferences.get({ 
+        key: STORAGE_KEYS.SCHEDULED_TASKS 
+      });
+      const scheduledTasks = JSON.parse(scheduledValue || '[]');
+      
+      // Check pending tasks
+      const { value: pendingValue } = await Preferences.get({ 
+        key: STORAGE_KEYS.PENDING_TASKS 
+      });
+      const pendingTasks = JSON.parse(pendingValue || '[]');
+      
+      // Check in both scheduled and pending tasks
+      return [...scheduledTasks, ...pendingTasks].some(task => 
+        task.task_id === taskId &&
+        task.date === date &&
+        task.time === time &&
+        task.location === location
+      );
+    } catch (error) {
+      console.error('Error checking for duplicate task:', error);
+      return false;
+    }
+  };
+
+   // Store task offline
+  const storeOfflineTask = async (task) => {
+  try {
+    // Only store in pending tasks when offline
+    const { value: pendingValue } = await Preferences.get({ 
+      key: STORAGE_KEYS.PENDING_TASKS 
+    });
+    const pendingTasks = JSON.parse(pendingValue || '[]');
+    pendingTasks.push(task);
+    await Preferences.set({
+      key: STORAGE_KEYS.PENDING_TASKS,
+      value: JSON.stringify(pendingTasks)
+    });
+  } catch (error) {
+    console.error('Error storing offline task:', error);
+    throw error;
+  }
+};
+
+
+ // Handle device registration and activity update
+ const handleDeviceRegistration = async (deviceId) => {
+  try {
+    const isOnline = await checkOnlineStatus();
+    if (!isOnline) {
+      console.log('Device is offline, skipping registration');
+      return;
+    }
+
     const response = await fetch(`${API_BASE_URL}/api/devices/update_activity`, {
       method: 'POST',
       headers: {
@@ -53,7 +146,6 @@ const handleDeviceRegistration = async (deviceId) => {
     
     if (response.ok) {
       console.log('Device activity updated:', data);
-      // If this is a new device, show a welcome message
       if (data.isNewDevice) {
         toast.success('Welcome to the application!');
       }
@@ -65,26 +157,24 @@ const handleDeviceRegistration = async (deviceId) => {
     toast.error('Error connecting to the service');
   }
 };
+
 // Fetch userId and handle device registration
+// Initialize user
 useEffect(() => {
   const initializeUser = async () => {
     try {
-      // Get existing userId
       const { value: id } = await Preferences.get({ key: 'userId' });
       
       if (id) {
         setUserId(id);
-        // Handle device registration/activity update
         await handleDeviceRegistration(id);
       } else {
-        // If no userId exists, create one
         const newId = crypto.randomUUID();
         await Preferences.set({
           key: 'userId',
           value: newId,
         });
         setUserId(newId);
-        // Register the new device
         await handleDeviceRegistration(newId);
       }
     } catch (error) {
@@ -95,7 +185,6 @@ useEffect(() => {
 
   initializeUser();
 }, []);
-
 
 
   const commonInputStyles = {
@@ -125,20 +214,98 @@ useEffect(() => {
     fetchUserId();
   }, []);
 
-  // Fetch available tasks
+  // Fetch available tasks with offline support
   useEffect(() => {
     const fetchAvailableTasks = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/api/coconut_tasks`);
-        if (response.ok) {
+        const isOnline = await checkOnlineStatus();
+        setIsOffline(!isOnline);
+
+        let tasks;
+        if (isOnline) {
+          console.log('📡 Device is online - fetching tasks from API...');
+          const response = await fetch(`${API_BASE_URL}/api/coconut_tasks`);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch tasks: ${response.status}`);
+          }
           const data = await response.json();
-          setAvailableTasks(data.coconut_tasks || []);
+          tasks = data.coconut_tasks;
+          
+          // Cache the fresh data
+          await Preferences.set({
+            key: 'coconut_tasks',
+            value: JSON.stringify(tasks)
+          });
+          
+          console.log(`✅ Successfully fetched ${tasks.length} tasks from API`);
+        } else {
+          console.log('📱 Device is offline - retrieving tasks from storage...');
+          tasks = await getOfflineTasks();
         }
+
+        if (!Array.isArray(tasks)) {
+          throw new Error('Invalid tasks data format');
+        }
+        setAvailableTasks(tasks);
       } catch (error) {
         console.error('Error fetching tasks:', error);
+        
+        // Try to get cached tasks as fallback
+        const cachedTasks = await getOfflineTasks();
+        if (Array.isArray(cachedTasks) && cachedTasks.length > 0) {
+          setAvailableTasks(cachedTasks);
+        } else {
+          toast.error('Unable to load tasks. Please check your connection.');
+        }
       }
     };
+
     fetchAvailableTasks();
+  }, []);
+
+  // Fetch forecast times with offline support
+  useEffect(() => {
+    const fetchForecastTimes = async () => {
+      try {
+        const isOnline = await checkOnlineStatus();
+        
+        let forecastData;
+        if (isOnline) {
+          const response = await axios.get(`${API_BASE_URL}/api/getWeatherData`);
+          forecastData = response.data;
+          
+          // Cache the fresh data
+          await Preferences.set({
+            key: 'forecast_data',
+            value: JSON.stringify(forecastData)
+          });
+        } else {
+          forecastData = await getOfflineWeather();
+        }
+
+        const lastDate = forecastData[forecastData.length - 1]?.date;
+        const timesForLastDate = forecastData
+          .filter((item) => item.date === lastDate)
+          .map((item) => dayjs(item.time, 'HH:mm:ss').format('HH:00'));
+
+        setAvailableForecastTimes(timesForLastDate);
+      } catch (error) {
+        console.error("Error fetching forecast times:", error);
+        // Try to get cached forecast data as fallback
+        const cachedForecast = await getOfflineWeather();
+        if (Array.isArray(cachedForecast) && cachedForecast.length > 0) {
+          const lastDate = cachedForecast[cachedForecast.length - 1]?.date;
+          const timesForLastDate = cachedForecast
+            .filter((item) => item.date === lastDate)
+            .map((item) => dayjs(item.time, 'HH:mm:ss').format('HH:00'));
+          setAvailableForecastTimes(timesForLastDate);
+        } else {
+          toast.error("Failed to fetch forecast data");
+        }
+      }
+    };
+
+    fetchForecastTimes();
   }, []);
 
 
@@ -172,44 +339,85 @@ useEffect(() => {
     setSelectedTask(task);
   };
 
-  // Create Task
+ // Modified handleCreateTask
   const handleCreateTask = async () => {
     if (!location || !selectedDate || !selectedTime || !hasInteractedWithTime || !selectedTask) {
-      alert("Please complete all inputs");
+      toast.error("Please complete all inputs");
       return;
     }
-  
+
     try {
-      const response = await fetch(`${API_BASE_URL}/api/createScheduleTask`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          userId,
-          task_name: selectedTask?.task_name,
-          date: selectedDate,
-          time: selectedTime,
-          location,
-        }),
-      });
-  
-      const data = await response.json();
-  
-      if (response.ok) {
-        toast.success('Task scheduled successfully!');
+      const isOnline = await checkOnlineStatus();
+      const coords = locationCoordinates[location];
+      
+      if (!coords) {
+        toast.error("Invalid location");
+        return;
+      }
+
+      const isDuplicate = await checkDuplicateTask(
+        selectedTask.task_id,
+        selectedDate,
+        selectedTime,
+        location
+      );
+
+      if (isDuplicate) {
+        toast.error('This task already exists for the selected date, time, and location');
+        return;
+      }
+
+      const newTask = {
+        task_id: selectedTask.task_id,
+        device_id: userId,
+        location,
+        lat: coords.lat,
+        lon: coords.lon,
+        date: selectedDate,
+        time: selectedTime,
+        task_name: selectedTask.task_name,
+        created_at: new Date().toISOString(),
+        synced: false
+      };
+
+      if (isOnline) {
+        // Try online first
+        const response = await fetch(`${API_BASE_URL}/api/createScheduleTask`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            userId,
+            task_name: selectedTask.task_name,
+            date: selectedDate,
+            time: selectedTime,
+            location,
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          toast.success('Task scheduled successfully!');
+          resetForm();
+          router.push('/task');
+        } else {
+          const data = await response.json();
+          throw new Error(data.message || 'Failed to schedule task');
+        }
+      } else {
+        // Store offline
+        await storeOfflineTask(newTask);
+        toast.success('Task stored offline and will sync when online');
         resetForm();
         router.push('/task');
-      } else if (response.status === 409) {
-        toast.error('This task already exists for the selected date, time, and location');
-      } else {
-        toast.error(data.message || 'Failed to schedule task');
       }
     } catch (error) {
       console.error('Failed to create task:', error);
-      toast.error('Error scheduling task');
+      toast.error(error.message || 'Error scheduling task');
     }
   };
+
 
   // Reset form
   const resetForm = () => {
@@ -221,27 +429,27 @@ useEffect(() => {
     setHasInteractedWithTime(false);
   };
 
-  useEffect(() => {
-    // Fetch forecast data and extract available times for the last date
-    const fetchInitialForecastData = async () => {
-      try {
-        const response = await axios.get(`${API_BASE_URL}/api/getWeatherData`);
-        const forecastData = response.data;
+  // useEffect(() => {
+  //   // Fetch forecast data and extract available times for the last date
+  //   const fetchInitialForecastData = async () => {
+  //     try {
+  //       const response = await axios.get(`${API_BASE_URL}/api/getWeatherData`);
+  //       const forecastData = response.data;
 
-        const lastDate = forecastData[forecastData.length - 1]?.date;
-        const timesForLastDate = forecastData
-          .filter((item) => item.date === lastDate)
-          .map((item) => dayjs(item.time, 'HH:mm:ss').format('HH:00'));
+  //       const lastDate = forecastData[forecastData.length - 1]?.date;
+  //       const timesForLastDate = forecastData
+  //         .filter((item) => item.date === lastDate)
+  //         .map((item) => dayjs(item.time, 'HH:mm:ss').format('HH:00'));
 
-        setAvailableForecastTimes(timesForLastDate);
-      } catch (error) {
-        console.error("Error fetching initial forecast data:", error);
-        showErrorToast("Failed to fetch initial forecast data.");
-      }
-    };
+  //       setAvailableForecastTimes(timesForLastDate);
+  //     } catch (error) {
+  //       console.error("Error fetching initial forecast data:", error);
+  //       showErrorToast("Failed to fetch initial forecast data.");
+  //     }
+  //   };
 
-    fetchInitialForecastData();
-  }, []); 
+  //   fetchInitialForecastData();
+  // }, []); 
 
   return (
     <LocalizationProvider dateAdapter={AdapterDayjs}>

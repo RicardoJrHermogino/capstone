@@ -6,6 +6,7 @@ import { PollingProvider, usePolling } from "@/utils/WeatherPolling";
 import { LocationProvider } from '@/utils/LocationContext';
 import { useState, useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';
+// import { useOnlineStatus } from '@/utils/useOnlineStatus';  // Import the custom hook
 
 // Error Boundary Component
 function ErrorFallback({ error, resetErrorBoundary }) {
@@ -50,6 +51,20 @@ function WeatherErrorHandler({ children }) {
 }
 
 function MyApp({ Component, pageProps }) {
+  // const isOnline = useOnlineStatus();  // Use the hook to track online status
+
+  // useEffect(() => {
+  //   if (isOnline === null) return;  // Don't show status until it's checked for the first time
+
+  //   if (isOnline) {
+  //     console.log('User is online');
+  //     // You can also show a toast or trigger any other logic
+  //   } else {
+  //     console.log('User is offline');
+  //     // Handle offline state here (e.g., show a notification or warning)
+  //   }
+  // }, [isOnline]);
+
   return (
     <PollingProvider>
       <LocationProvider>
@@ -57,6 +72,11 @@ function MyApp({ Component, pageProps }) {
           <ThemeProvider theme={theme}>
             <Component {...pageProps} />
             <Toaster />
+            {/* {isOnline === false && (
+              <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-red-500 text-white p-4 rounded-md shadow-lg">
+                You are offline. Please check your internet connection.
+              </div>
+            )} */}
           </ThemeProvider>
         </WeatherErrorHandler>
       </LocationProvider>
