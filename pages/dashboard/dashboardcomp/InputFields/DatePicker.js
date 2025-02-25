@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { FormControl, InputLabel, Select, MenuItem, Grid, OutlinedInput, InputAdornment } from "@mui/material";
+import { FormControl, InputLabel, Select, MenuItem, Grid, OutlinedInput, InputAdornment, CircularProgress, Typography } from "@mui/material";
 import CalendarTodayIcon from "@mui/icons-material/CalendarToday";
 import dayjs from "dayjs";
 import axios from "axios";
@@ -76,7 +76,12 @@ const DatePicker = ({ selectedDate, setSelectedDate, MenuProps }) => {
     fetchAvailableDates();
   }, [fetchAvailableDates]);
 
-  if (loading) return <div>Loading...</div>;
+  if (loading) return <Grid item xs={12} sm={12} align="center">
+    <CircularProgress size={24} />
+
+    </Grid>
+  ;
+
   if (error) return <div style={{ color: "red" }}>{error}</div>;
 
   return (

@@ -16,12 +16,14 @@ import API_BASE_URL from '@/config/apiConfig';
 import TaskCard from './TaskCard';
 import EditTaskDialog from './editDialog';
 import DeleteConfirmationDialog from './confDelete';
+import { locationCoordinates } from '@/utils/locationCoordinates';
 
 const OPENWEATHER_URL = "https://httpbin.org/get";
 const STORAGE_KEYS = {
   SCHEDULED_TASKS: 'scheduled_tasks',
   PENDING_TASKS: 'pending_tasks',
-  DELETED_TASKS: 'deleted_tasks', // New storage key for deleted tasks
+  DELETED_TASKS: 'deleted_tasks', // Storage key for deleted tasks
+  PENDING_DELETIONS: 'pending_deletions', // Storage for tasks pending deletion when back online
 };
 
 const AllScheduled = () => {
@@ -36,6 +38,18 @@ const AllScheduled = () => {
   const [isOffline, setIsOffline] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
 
+  // Filter state
+  const [filterType, setFilterType] = useState('all');
+
+  // Edit Task State
+  const [editTask, setEditTask] = useState(null);
+  const [editOpen, setEditOpen] = useState(false);
+
+  // Delete Task State
+  const [deleteTaskId, setDeleteTaskId] = useState(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [reloading, setReloading] = useState(false); // Add this state at the top with other states
+
   // Check online status
   const checkOnlineStatus = useCallback(async () => {
     try {
@@ -46,7 +60,7 @@ const AllScheduled = () => {
     }
   }, []);
 
-  // Add new function to get offline tasks
+  // Function to get offline scheduled tasks
   const getOfflineScheduledTasks = async () => {
     try {
       const { value: scheduledValue } = await Preferences.get({
@@ -89,6 +103,7 @@ const AllScheduled = () => {
     }
   };
 
+
   // Add new function to handle deleted tasks storage
   const storeDeletedTask = async (taskId) => {
     try {
@@ -108,13 +123,42 @@ const AllScheduled = () => {
     }
   };
 
+  const storePendingDeletion = async (task) => {
+    try {
+      const { value } = await Preferences.get({ key: STORAGE_KEYS.PENDING_DELETIONS });
+      const pendingDeletions = JSON.parse(value || '[]');
+     
+      // Add the task to pending deletions if not already present
+      const existingIndex = pendingDeletions.findIndex(t => 
+        t.sched_id === task.sched_id || 
+        (t.task_id === task.task_id && t.date === task.date && t.time === task.time)
+      );
+      
+      if (existingIndex === -1) {
+        pendingDeletions.push(task);
+        await Preferences.set({
+          key: STORAGE_KEYS.PENDING_DELETIONS,
+          value: JSON.stringify(pendingDeletions)
+        });
+      }
+      
+      return true;
+    } catch (error) {
+      console.error('Error storing pending deletion:', error);
+      return false;
+    }
+  };
+
+
   const syncDeletedTasks = async () => {
     try {
       const { value } = await Preferences.get({ key: STORAGE_KEYS.DELETED_TASKS });
       const deletedTasks = JSON.parse(value || '[]');
-
+  
       if (deletedTasks.length === 0) return;
-
+  
+      console.log('Attempting to sync deleted tasks:', deletedTasks);
+  
       const deletePromises = deletedTasks.map(async (taskId) => {
         // Skip null or undefined taskIds
         if (!taskId) {
@@ -126,36 +170,55 @@ const AllScheduled = () => {
           const response = await fetch(`${API_BASE_URL}/api/getScheduledTasks?schedId=${taskId}`, {
             method: 'DELETE',
           });
-
-          if (!response.ok) {
-            throw new Error(`Failed to sync deleted task: ${taskId}`);
+  
+          // Consider 404 (not found) as a successful delete
+          // since the task doesn't exist on the server anyway
+          if (response.ok || response.status === 404) {
+            console.log(`Successfully synced delete for task: ${taskId}`);
+            return taskId;
           }
-
-          return taskId;
+          
+          console.warn(`Failed to sync deleted task: ${taskId}, status: ${response.status}`);
+          // Don't throw here, just return null to indicate this task wasn't synced
+          return null;
         } catch (error) {
-          console.error(`Error syncing deleted task: ${taskId}`, error);
+          console.error(`Network error syncing deleted task: ${taskId}`, error);
+          // Don't throw, just return null
           return null;
         }
       });
-
-      const syncedDeletes = await Promise.all(deletePromises);
-      const successfulDeletes = syncedDeletes.filter(id => id !== null);
-
+  
+      // Use allSettled instead of all to prevent any rejection from stopping all syncs
+      const results = await Promise.allSettled(deletePromises);
+      
+      // Process successful results
+      const successfulDeletes = results
+        .filter(result => result.status === 'fulfilled' && result.value !== null)
+        .map(result => result.value);
+  
       if (successfulDeletes.length > 0) {
         // Remove successfully synced deletes from storage
         const remainingDeletes = deletedTasks.filter(
           id => !successfulDeletes.includes(id)
         );
-
+  
         await Preferences.set({
           key: STORAGE_KEYS.DELETED_TASKS,
           value: JSON.stringify(remainingDeletes)
         });
-
+  
         toast.success(`Successfully synced ${successfulDeletes.length} deleted tasks`);
+        
+        // Log remaining tasks for debugging
+        if (remainingDeletes.length > 0) {
+          console.log(`${remainingDeletes.length} tasks still pending sync`);
+        }
       }
     } catch (error) {
+      // Catch any errors in the overall sync process
       console.error('Error syncing deleted tasks:', error);
+      toast.error('Some tasks failed to sync, will try again later');
+      // Don't rethrow, as we want this function to never crash the UI
     }
   };
 
@@ -263,6 +326,58 @@ const AllScheduled = () => {
     }
   };
 
+  const syncPendingDeletions = async () => {
+    try {
+      const { value } = await Preferences.get({ key: STORAGE_KEYS.PENDING_DELETIONS });
+      const pendingDeletions = JSON.parse(value || '[]');
+      
+      if (pendingDeletions.length === 0) return;
+      
+      console.log('Syncing pending deletions:', pendingDeletions.length);
+      
+      const results = await Promise.allSettled(pendingDeletions.map(async (task) => {
+        try {
+          // Use the appropriate endpoint for your API
+          const response = await fetch(`${API_BASE_URL}/api/getScheduledTasks?schedId=${task.sched_id}`, {
+            method: 'DELETE',
+          });
+          
+          if (response.ok || response.status === 404) {
+            return task;
+          }
+          return null;
+        } catch (error) {
+          console.error(`Error syncing deletion for task ${task.sched_id}:`, error);
+          return null;
+        }
+      }));
+      
+      const successful = results
+        .filter(r => r.status === 'fulfilled' && r.value !== null)
+        .map(r => r.value);
+      
+      if (successful.length > 0) {
+        // Remove successful deletions from pending list
+        const remaining = pendingDeletions.filter(task => 
+          !successful.some(s => s.sched_id === task.sched_id)
+        );
+        
+        await Preferences.set({
+          key: STORAGE_KEYS.PENDING_DELETIONS,
+          value: JSON.stringify(remaining)
+        });
+        
+        if (remaining.length === 0) {
+          toast.success('All pending deletions synchronized');
+        } else {
+          toast.success(`Synced ${successful.length} deletions, ${remaining.length} remaining`);
+        }
+      }
+    } catch (error) {
+      console.error('Error syncing pending deletions:', error);
+    }
+  };
+
   // Get tasks from Preferences
   const getOfflineTasks = useCallback(async () => {
     try {
@@ -355,16 +470,7 @@ const AllScheduled = () => {
     initializeUser();
   }, []);
 
-  // Filter state
-  const [filterType, setFilterType] = useState('all');
-
-  // Edit Task State
-  const [editTask, setEditTask] = useState(null);
-  const [editOpen, setEditOpen] = useState(false);
-
-  // Delete Task State
-  const [deleteTaskId, setDeleteTaskId] = useState(null);
-  const [deleteOpen, setDeleteOpen] = useState(false);
+  
 
   // Update the checkTaskFeasibility function in AllScheduled.js
   const checkTaskFeasibility = useCallback((task, weatherData, taskRequirements) => {
@@ -437,20 +543,20 @@ const AllScheduled = () => {
     return { feasible: true, reason: 'All conditions suitable' };
   }, []);
 
-  // Add debug log in filterTasks
+  // Filter tasks function
   const filterTasks = useCallback(() => {
     console.log('Filtering tasks:', {
       userTasks,
       weatherData,
       taskRequirements,
       filterType
-    }); // Debug log
+    });
    
     if (!userTasks.length) return [];
 
     const tasksWithFeasibility = userTasks.map(task => {
       const feasibility = checkTaskFeasibility(task, weatherData, taskRequirements);
-      console.log('Task feasibility:', { task, feasibility }); // Debug log
+      console.log('Task feasibility:', { task, feasibility });
       return {
         ...task,
         feasibility
@@ -467,7 +573,7 @@ const AllScheduled = () => {
     }
   }, [userTasks, weatherData, taskRequirements, filterType, checkTaskFeasibility]);
 
-  // Update tasks effect
+   // Update tasks effect
   useEffect(() => {
     const filtered = filterTasks();
     setFilteredTasks(filtered);
@@ -480,8 +586,6 @@ const AllScheduled = () => {
     }
   };
  
-  // Add debug logs in your weather and tasks fetch
-  // Fetch weather and tasks
   useEffect(() => {
     const fetchWeatherAndTasks = async () => {
       try {
@@ -500,6 +604,17 @@ const AllScheduled = () => {
          
           weatherResult = weatherResponse.data;
           tasksResult = tasksResponse.data.coconut_tasks;
+
+          // Store fetched data for offline use
+          await Preferences.set({
+            key: 'forecast_data',
+            value: JSON.stringify(weatherResult)
+          });
+          
+          await Preferences.set({
+            key: 'coconut_tasks',
+            value: JSON.stringify(tasksResult)
+          });
 
         } else {
           console.log('📱 Device is offline - retrieving data from storage...');
@@ -535,6 +650,7 @@ const AllScheduled = () => {
     fetchWeatherAndTasks();
   }, [checkOnlineStatus, getOfflineWeather, getOfflineTasks]);
 
+
   useEffect(() => {
     const fetchUserId = async () => {
       const { value: id } = await Preferences.get({ key: 'userId' });
@@ -544,69 +660,79 @@ const AllScheduled = () => {
     fetchUserId();
   }, []);
 
- 
-  // Modify the existing fetchTasks effect
-  useEffect(() => {
-    const fetchTasks = async () => {
-      if (!userId) return;
+ // First, extract your fetch logic into a standalone function
+// Add this before the useEffect where it's currently defined
+const fetchTasks = async () => {
+  if (!userId) return;
 
-      try {
-        setLoading(true);
-        const isOnline = await checkOnlineStatus();
-        setIsOffline(!isOnline);
+  try {
+    setLoading(true);
+    const isOnline = await checkOnlineStatus();
+    setIsOffline(!isOnline);
 
-        let tasks;
-        if (isOnline) {
-          // Sync deleted tasks first
-          await syncDeletedTasks();
-          // Then sync pending tasks
-          await syncPendingTasks();
-         
-          // Finally fetch all tasks from the server
-          const response = await fetch(`${API_BASE_URL}/api/getScheduledTasks?deviceId=${userId}`);
-          if (!response.ok) {
-            throw new Error('Failed to fetch tasks from server');
-          }
-          tasks = await response.json();
-         
-          // Update offline storage with latest data
-          await Preferences.set({
-            key: STORAGE_KEYS.SCHEDULED_TASKS,
-            value: JSON.stringify(tasks)
-          });
-        } else {
-          // Get tasks from offline storage
-          tasks = await getOfflineScheduledTasks();
-        }
-
-        setUserTasks(tasks);
-      } catch (error) {
-        console.error('Error fetching tasks:', error);
-        toast.error('Error loading tasks');
-       
-        // Fallback to offline data if fetch fails
-        const offlineTasks = await getOfflineScheduledTasks();
-        setUserTasks(offlineTasks);
-      } finally {
-        setLoading(false);
+    let tasks;
+    if (isOnline) {
+      // Sync in this order: pending deletions, deleted tasks, then pending tasks
+      await syncPendingDeletions();
+      await syncDeletedTasks();
+      await syncPendingTasks();
+      
+      // Finally fetch all tasks from the server
+      const response = await fetch(`${API_BASE_URL}/api/getScheduledTasks?deviceId=${userId}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch tasks from server');
       }
-    };
+      tasks = await response.json();
+      
+      // Update offline storage with latest data
+      await Preferences.set({
+        key: STORAGE_KEYS.SCHEDULED_TASKS,
+        value: JSON.stringify(tasks)
+      });
+    } else {
+      // Get tasks from offline storage
+      tasks = await getOfflineScheduledTasks();
+    }
 
-    fetchTasks();
-  }, [userId, checkOnlineStatus]);
+    setUserTasks(tasks);
+  } catch (error) {
+    console.error('Error fetching tasks:', error);
+    toast.error('Error loading tasks');
+    
+    // Fallback to offline data if fetch fails
+    const offlineTasks = await getOfflineScheduledTasks();
+    setUserTasks(offlineTasks);
+  } finally {
+    setLoading(false);
+  }
+};
 
+// Then, modify your useEffect to use this function
+useEffect(() => {
+  fetchTasks();
+}, [userId, checkOnlineStatus]);
+
+  
   // Edit Task Handler
   const handleEditTask = (task) => {
     setEditTask(task);
     setEditOpen(true);
   };
- 
-  const [reloading, setReloading] = useState(false); // Add this state at the top with other states
 
-  const updateTask = async () => {
-    if (!editTask) return;
- 
-    try {
+
+  // Update task function
+const updateTask = async () => {
+  if (!editTask) return;
+
+  try {
+    const isOnline = await checkOnlineStatus();
+    
+    // Get coordinates for the location
+    const coordinates = editTask.location ? 
+      locationCoordinates[editTask.location] : 
+      { lat: null, lon: null };
+    
+    if (isOnline) {
       const response = await fetch(`${API_BASE_URL}/api/getScheduledTasks`, {
         method: 'PUT',
         headers: {
@@ -614,77 +740,215 @@ const AllScheduled = () => {
         },
         body: JSON.stringify({
           schedId: editTask.sched_id,
-          date: editTask.date,     // This will now have the updated date
-          time: editTask.time,     // This will now have the updated time
+          date: editTask.date,
+          time: editTask.time,
           location: editTask.location,
           taskName: editTask.task_name,
+          lat: coordinates.lat,
+          lon: coordinates.lon,
         }),
       });
- 
+     
       const data = await response.json();
      
-      if (response.ok) {
-        setEditOpen(false);
-        toast.success('Task updated successfully');
-        setReloading(true); // Set loading state to true
-       
-        // Add a small delay to show the loading state
-        setTimeout(() => {
-          window.location.reload();
-        }, 500);
-      } else if (response.status === 409) {
-        toast.error('A task with these details already exists');
-      } else {
-        toast.error(data.message || 'Failed to update task');
+      if (!response.ok) {
+        if (response.status === 409) {
+          toast.error('A task with these details already exists');
+          return;
+        } else {
+          throw new Error(data.message || 'Failed to update task');
+        }
       }
-    } catch (error) {
-      console.error('Failed to update task:', error);
-      toast.error('Error updating task');
-    }
-  };
-
-  // Open Delete Confirmation
-  const handleDeleteTask = (schedId) => {
-    setDeleteTaskId(schedId);
-    setDeleteOpen(true);
-  };
- 
-  // Modified delete handler to update UI immediately
-  const confirmDelete = async () => {
-    try {
-      const isOnline = await checkOnlineStatus();
       
-      if (isOnline) {
-        const response = await fetch(`${API_BASE_URL}/api/getScheduledTasks?schedId=${deleteTaskId}`, {
+      toast.success('Task updated successfully');
+    } else {
+      // Handle offline update
+      // Update in local storage
+      const { value: scheduledValue } = await Preferences.get({
+        key: STORAGE_KEYS.SCHEDULED_TASKS
+      });
+      
+      let scheduledTasks = JSON.parse(scheduledValue || '[]');
+      
+      // Find and update the task
+      const updatedTasks = scheduledTasks.map(task => {
+        if (task.sched_id === editTask.sched_id) {
+          return {
+            ...task,
+            date: editTask.date,
+            time: editTask.time,
+            location: editTask.location,
+            task_name: editTask.task_name,
+            lat: coordinates.lat,
+            lon: coordinates.lon
+          };
+        }
+        return task;
+      });
+      
+      await Preferences.set({
+        key: STORAGE_KEYS.SCHEDULED_TASKS,
+        value: JSON.stringify(updatedTasks)
+      });
+      
+      // Also update the task in the UI state
+      setUserTasks(prevTasks => 
+        prevTasks.map(task => 
+          task.sched_id === editTask.sched_id 
+            ? {
+                ...task,
+                date: editTask.date,
+                time: editTask.time,
+                location: editTask.location,
+                task_name: editTask.task_name,
+                lat: coordinates.lat,
+                lon: coordinates.lon
+              }
+            : task
+        )
+      );
+      
+      toast.success('Task updated locally (offline mode)');
+    }
+    setEditOpen(false);
+    fetchTasks();
+  } catch (error) {
+    console.error('Failed to update task:', error);
+    toast.error('Error updating task');
+  }
+};
+
+
+
+// Open Delete Confirmation
+const handleDeleteTask = (schedId) => {
+  // Ensure schedId is a string for consistency
+  const taskId = String(schedId);
+  console.log('Setting delete task ID:', taskId);
+  
+  // Set it directly in state
+  setDeleteTaskId(taskId);
+  
+  // For debugging, also store it in localStorage 
+  localStorage.setItem('temp_delete_id', taskId);
+  
+  setDeleteOpen(true);
+};
+
+
+const confirmDelete = async () => {
+  try {
+    // Get the task ID from both state and localStorage (as backup)
+    let taskIdToDelete = deleteTaskId;
+    
+    // If state doesn't have the ID, try localStorage
+    if (!taskIdToDelete) {
+      taskIdToDelete = localStorage.getItem('temp_delete_id');
+      console.log('Retrieved taskId from localStorage:', taskIdToDelete);
+    }
+    
+    // Log the current value
+    console.log('Task ID to delete:', taskIdToDelete);
+    console.log('Current deleteTaskId state:', deleteTaskId);
+    
+    // Still no valid ID? Show error and return
+    if (!taskIdToDelete) {
+      console.error('No valid task ID to delete');
+      toast.error('Error: No task selected for deletion');
+      setDeleteOpen(false);
+      return;
+    }
+    
+    const isOnline = await checkOnlineStatus();
+    
+    console.log(`Attempting to delete task with ID: ${taskIdToDelete}`);
+    console.log('Current tasks:', userTasks);
+    
+    // Store the deleted task ID for later sync
+    await storeDeletedTask(taskIdToDelete);
+    
+    // Update UI state immediately - convert both to strings for comparison
+    setUserTasks(prevTasks => prevTasks.filter(task => String(task.sched_id) !== String(taskIdToDelete)));
+    setFilteredTasks(prevTasks => prevTasks.filter(task => String(task.sched_id) !== String(taskIdToDelete)));
+    
+    // Online deletion attempt
+    if (isOnline) {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/getScheduledTasks?schedId=${taskIdToDelete}`, {
           method: 'DELETE',
         });
-
-        if (!response.ok) {
-          throw new Error('Failed to delete task');
-        }
-      } else {
-        // Store the deleted task ID for later sync
-        await storeDeletedTask(deleteTaskId);
+      } catch (error) {
+        console.warn(`Server deletion failed for task ${taskIdToDelete}:`, error);
+        // Continue with local deletion
       }
-
-      // Update local state immediately - remove the deleted task
-      setUserTasks(prevTasks => prevTasks.filter(task => task.sched_id !== deleteTaskId));
-      
-      // Also update filtered tasks to maintain UI consistency
-      setFilteredTasks(prevTasks => prevTasks.filter(task => task.sched_id !== deleteTaskId));
-      
-      // Update local storage
-      const offlineTasks = await getOfflineScheduledTasks();
-      
-      // Close the dialog
-      setDeleteOpen(false);
-      toast.success('Task deleted successfully');
-    } catch (error) {
-      console.error('Failed to delete task:', error);
-      toast.error('Error deleting task');
     }
-  };
- 
+    
+    // Update local storage regardless of online/offline status
+    try {
+      // 1. Handle scheduled tasks
+      const { value: scheduledValue } = await Preferences.get({
+        key: STORAGE_KEYS.SCHEDULED_TASKS
+      });
+      
+      let scheduledTasks = [];
+      try {
+        scheduledTasks = JSON.parse(scheduledValue || '[]');
+      } catch (parseError) {
+        console.error('Error parsing scheduled tasks:', parseError);
+        scheduledTasks = [];
+      }
+      
+      // Filter out the task to delete
+      const filteredTasks = scheduledTasks.filter(task => 
+        String(task.sched_id) !== String(taskIdToDelete)
+      );
+      
+      await Preferences.set({
+        key: STORAGE_KEYS.SCHEDULED_TASKS,
+        value: JSON.stringify(filteredTasks)
+      });
+      
+      // 2. Also check and remove from pending tasks
+      const { value: pendingValue } = await Preferences.get({
+        key: STORAGE_KEYS.PENDING_TASKS
+      });
+      
+      if (pendingValue) {
+        let pendingTasks = [];
+        try {
+          pendingTasks = JSON.parse(pendingValue || '[]');
+        } catch (parseError) {
+          console.error('Error parsing pending tasks:', parseError);
+          pendingTasks = [];
+        }
+        
+        const filteredPendingTasks = pendingTasks.filter(task => 
+          String(task.sched_id) !== String(taskIdToDelete)
+        );
+        
+        await Preferences.set({
+          key: STORAGE_KEYS.PENDING_TASKS,
+          value: JSON.stringify(filteredPendingTasks)
+        });
+      }
+    } catch (storageError) {
+      console.error('Error updating local storage after deletion:', storageError);
+    }
+    
+    // Clean up
+    localStorage.removeItem('temp_delete_id');
+    setDeleteTaskId(null);
+    setDeleteOpen(false);
+    toast.success('Task deleted successfully');
+    
+  } catch (error) {
+    console.error('Failed to delete task:', error);
+    toast.error('Error deleting task');
+  }
+};
+  
+
+  
   if (loading || loadingWeather) {
     return (
       <Box
@@ -700,6 +964,8 @@ const AllScheduled = () => {
     );
   }
 
+
+  
   return (
     <Box sx={{ mt: 4 }}>
       <Box
@@ -765,28 +1031,13 @@ const AllScheduled = () => {
 
       <DeleteConfirmationDialog
         open={deleteOpen}
-        onClose={() => setDeleteOpen(false)}
+        onClose={() => {
+          setDeleteOpen(false);
+          // Don't clear the ID until after confirmation
+        }}
         onConfirm={confirmDelete}
       />
-      
-      {reloading && (
-        <Box
-          sx={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: 'rgba(255, 255, 255, 0.8)',
-            zIndex: 9999,
-          }}
-        >
-          <CircularProgress size={60} />
-        </Box>
-      )}
+
     </Box>
   );
 };

@@ -51,25 +51,6 @@ useEffect(() => {
   }
 }, [selectedDate, selectedTime]);  // Remove task and setTask from dependencies
 
-  // useEffect(() => {
-  //   const fetchInitialForecastData = async () => {
-  //     try {
-  //       const response = await axios.get(`${API_BASE_URL}/api/getWeatherData`);
-  //       const forecastData = response.data;
-
-  //       const lastDate = forecastData[forecastData.length - 1]?.date;
-  //       const timesForLastDate = forecastData
-  //         .filter((item) => item.date === lastDate)
-  //         .map((item) => dayjs(item.time, 'HH:mm:ss').format('HH:00'));
-
-  //       setAvailableForecastTimes(timesForLastDate);
-  //     } catch (error) {
-  //       console.error("Error fetching initial forecast data:", error);
-  //     }
-  //   };
-
-  //   fetchInitialForecastData();
-  // }, []); 
 
   const dateOptions = Array.from({ length: 6 }, (_, index) => {
     const date = dayjs().add(index, 'day');

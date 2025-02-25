@@ -27,6 +27,16 @@ const STORAGE_KEYS = {
   PENDING_TASKS: 'pending_tasks',
 };
 
+// Function to generate random sched_id for offline mode
+const generateOfflineSchedId = () => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-';
+  let result = '';
+  for (let i = 0; i < 4; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return `offline_${result}`;
+};
+
 const AddScheduledTask = () => {
   const [userId, setUserId] = useState(null);
   const [availableTasks, setAvailableTasks] = useState([]);
@@ -105,25 +115,36 @@ const getOfflineTasks = async () => {
     }
   };
 
-   // Store task offline
-  const storeOfflineTask = async (task) => {
+ // Modified storeOfflineTask function
+const storeOfflineTask = async (task) => {
   try {
-    // Only store in pending tasks when offline
+    // Generate a unique offline sched_id
+    const offlineSchedId = generateOfflineSchedId();
+    
+    // Add sched_id to task
+    const taskWithSchedId = {
+      ...task,
+      sched_id: offlineSchedId
+    };
+    
+    // Store in pending tasks
     const { value: pendingValue } = await Preferences.get({ 
       key: STORAGE_KEYS.PENDING_TASKS 
     });
     const pendingTasks = JSON.parse(pendingValue || '[]');
-    pendingTasks.push(task);
+    pendingTasks.push(taskWithSchedId);
     await Preferences.set({
       key: STORAGE_KEYS.PENDING_TASKS,
       value: JSON.stringify(pendingTasks)
     });
+    
+    console.log(`Stored offline task with generated sched_id: ${offlineSchedId}`);
+    return offlineSchedId;
   } catch (error) {
     console.error('Error storing offline task:', error);
     throw error;
   }
 };
-
 
  // Handle device registration and activity update
  const handleDeviceRegistration = async (deviceId) => {
@@ -406,7 +427,7 @@ useEffect(() => {
           throw new Error(data.message || 'Failed to schedule task');
         }
       } else {
-        // Store offline
+        // Offline flow - generate and store with offline sched_id
         await storeOfflineTask(newTask);
         toast.success('Task stored offline and will sync when online');
         resetForm();
@@ -429,28 +450,7 @@ useEffect(() => {
     setHasInteractedWithTime(false);
   };
 
-  // useEffect(() => {
-  //   // Fetch forecast data and extract available times for the last date
-  //   const fetchInitialForecastData = async () => {
-  //     try {
-  //       const response = await axios.get(`${API_BASE_URL}/api/getWeatherData`);
-  //       const forecastData = response.data;
-
-  //       const lastDate = forecastData[forecastData.length - 1]?.date;
-  //       const timesForLastDate = forecastData
-  //         .filter((item) => item.date === lastDate)
-  //         .map((item) => dayjs(item.time, 'HH:mm:ss').format('HH:00'));
-
-  //       setAvailableForecastTimes(timesForLastDate);
-  //     } catch (error) {
-  //       console.error("Error fetching initial forecast data:", error);
-  //       showErrorToast("Failed to fetch initial forecast data.");
-  //     }
-  //   };
-
-  //   fetchInitialForecastData();
-  // }, []); 
-
+  
   return (
     <LocalizationProvider dateAdapter={AdapterDayjs}>
     <Box sx={{ mt: 4, px: 2 }}>

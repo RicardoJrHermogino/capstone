@@ -9,7 +9,7 @@ const config: CapacitorConfig = {
     // url: 'http://10.0.0.35:3000', 
     // url: 'http://10.0.0.36:3000', 
     // url: 'http://10.0.0.37:3000',
-    url: 'http://10.0.0.38:3000',
+    // url: 'http://10.0.0.38:3000',
     // url: 'http://192.168.132.235:3000',
     cleartext: true, 
   },

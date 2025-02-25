@@ -179,7 +179,7 @@ const CustomTimePicker = ({
           ))}
         </Select>
       </FormControl>
-      {error && <div style={{ color: "orange", marginTop: "8px" }}>{error}</div>}
+      {/* {error && <div style={{ color: "orange", marginTop: "8px" }}>{error}</div>} */}
     </Grid>
   );
 };
